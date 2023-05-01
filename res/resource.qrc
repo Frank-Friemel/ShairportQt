@@ -1,0 +1,16 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource>
+        <file>ShairportQt.png</file>
+        <file>ShairportQt.ico</file>
+        <file>settings-16.bmp</file>
+        <file>exit-16.bmp</file>
+        <file>info-16.bmp</file>
+        <file>play.png</file>
+        <file>pause.png</file>
+        <file>skip_to_next.png</file>
+        <file>skip_to_prev.png</file>
+        <file>ArtShadow.png</file>
+        <file>AdShadow.png</file>
+    </qresource>
+</RCC>
