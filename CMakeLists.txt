@@ -18,7 +18,6 @@ else()
 endif()
 
 find_package(OpenSSL REQUIRED)
-find_package(GTest CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(sockpp CONFIG REQUIRED)
 
@@ -97,6 +96,7 @@ endif()
 
 if (NOT(CMAKE_BUILD_TYPE MATCHES ".*MinSize.*") AND NOT(CMAKE_BUILD_TYPE MATCHES ".*RelWith.*"))
     # Unit testing
+    find_package(GTest CONFIG REQUIRED)
     include(CTest)
     enable_testing()
 
