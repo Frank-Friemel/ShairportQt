@@ -340,13 +340,13 @@ void MainDlg::CreateMenuBar()
 #else
     const QKeySequence quitShortcutSequence(QKeySequence::StandardKey::Quit);
 #endif
-    fileMenu->addAction(QIcon(":/exit-16.bmp"), strQuit, this, &MainDlg::OnQuit, quitShortcutSequence);
+    fileMenu->addAction(QIcon(":/exit-16.ico"), strQuit, this, &MainDlg::OnQuit, quitShortcutSequence);
 
     QPointer<QMenu> editMenu = new QMenu(GetString(StringID::MENU_EDIT), this);
-    editMenu->addAction(QIcon(":/settings-16.bmp"), GetString(StringID::MENU_OPTIONS), this, &MainDlg::OnOptions);
+    editMenu->addAction(QIcon(":/settings-16.ico"), GetString(StringID::MENU_OPTIONS), this, &MainDlg::OnOptions);
 
     QPointer<QMenu> helpMenu = new QMenu(GetString(StringID::MENU_HELP), this);
-    helpMenu->addAction(QIcon(":/info-16.bmp"),GetString( StringID::MENU_ABOUT), this, &MainDlg::OnAbout);
+    helpMenu->addAction(QIcon(":/info-16.ico"),GetString( StringID::MENU_ABOUT), this, &MainDlg::OnAbout);
 
     m_menuBar->addMenu(fileMenu);
     m_menuBar->addMenu(editMenu);
@@ -609,7 +609,7 @@ void MainDlg::ConfigureSystemTray()
                 trayIconMenu->actions().at(1)->setChecked(VariantValue::Key("TrayTrackInfo").TryGet<bool>(m_config).value_or(false));
             }
             trayIconMenu->addSeparator();
-            trayIconMenu->addAction(QIcon(":/exit-16.bmp"), GetString(StringID::MENU_QUIT), this, &MainDlg::OnQuit);
+            trayIconMenu->addAction(QIcon(":/exit-16.ico"), GetString(StringID::MENU_QUIT), this, &MainDlg::OnQuit);
 
             m_systemTray = new QSystemTrayIcon(this);
             m_systemTray->setContextMenu(trayIconMenu);
