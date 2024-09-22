@@ -85,25 +85,26 @@ When you have issues with `ShairportQt` please provide these informations:
 
 `ShairportQt` is a `cmake` project. You'll need a complete development environment and these packages to build it:
 
-- `OpenSSl`
+- `openssl`
 - `spdlog`
 - `sockpp`
 - `qtbase`
 - `gtest`
 
-I recommend to use `vcpkg` in order to get these packages.
+I recommend to use `vcpkg` in order to get them.
 It works very well on Linux and Windows.
 
 On Windows just open `ShairportQt` as cmake project with Visual Studio.
 On Linux you may use Visual Studio Code or build from the command line (assumed you're using `vcpkg`):
 
-- `git clone https://github.com/Frank-Friemel/ShairportQt.git`
-- `cd ShairportQt`
-- `mkdir build`
-- `cd build`
-- `cmake .. -DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release`
-- `cmake --build .`
-
+```shell
+git clone https://github.com/Frank-Friemel/ShairportQt.git
+cd ShairportQt
+mkdir build
+cd build
+cmake .. -DCMAKE_TOOLCHAIN_FILE=${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build .
+```
 
 ### Credits
 
