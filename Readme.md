@@ -32,7 +32,7 @@ installation of `Bonjour`.
 
 The installation for Linux depends a bit on your Linux distribution.
 I myself am using [`Manjaro-Linux`](https://manjaro.org/)
-which worked out of the box. You'll need at least `Qt 6.7` installed on your machine.
+which worked out of the box and I would expect the same for all KDE based distributions. You'll need at least `Qt 6.7` installed on your machine.
 
 May be anybody of the Linux Pros can give advice how to improve the installation experience with a `.deb` or `.rpm`
 package. Comments are appreciated.
@@ -41,8 +41,10 @@ The [releases](https://github.com/Frank-Friemel/ShairportQt/releases) package co
 [zip](https://github.com/Frank-Friemel/ShairportQt/releases) file, open a terminal, change-directory to
 `Linux_x64` and start script `install.sh` as superuser:
 
-- `chmod a+x install.sh`
-- `sudo ./install.sh`
+```shell
+chmod a+x install.sh
+sudo ./install.sh
+```
 
 Afterwards `ShairportQt` application should be available from your start menu.
 
@@ -52,8 +54,10 @@ The [releases](https://github.com/Frank-Friemel/ShairportQt/releases) package co
 [zip](https://github.com/Frank-Friemel/ShairportQt/releases) file, open a terminal, change-directory to
 `Raspbian` and start script `install.sh` as superuser:
 
-- `chmod a+x install.sh`
-- `sudo ./install.sh`
+```shell
+chmod a+x install.sh
+sudo ./install.sh
+```
 
 Afterwards `ShairportQt` application should be available from your start menu.
 
@@ -75,7 +79,7 @@ On my Raspbian ... I had to install `libavahi-compat-libdnssd-dev`.
 
 ## Problem reports
 
-When you have issues with `ShairportQt` please provide these informations:
+When you have issues with `ShairportQt` please provide following informations:
 
 - Operating System you're using.
 - detailed steps how to reproduce.
@@ -83,7 +87,7 @@ When you have issues with `ShairportQt` please provide these informations:
 
 ## Building
 
-`ShairportQt` is a `cmake` project. You'll need a complete development environment and these packages to build it:
+`ShairportQt` is a `CMake` project. You'll need a complete c++ development environment and these packages to build it:
 
 - `openssl`
 - `spdlog`
@@ -94,7 +98,7 @@ When you have issues with `ShairportQt` please provide these informations:
 I recommend to use `vcpkg` in order to get them.
 It works very well on Linux and Windows.
 
-On Windows just open `ShairportQt` as cmake project with Visual Studio.
+On Windows just open `ShairportQt` as CMake project with Visual Studio.
 On Linux you may use Visual Studio Code or build from the command line (assumed you're using `vcpkg`):
 
 ```shell
