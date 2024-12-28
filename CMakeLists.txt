@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15.0)
-project(ShairportQt VERSION 1.0.0.3 LANGUAGES CXX)
+project(ShairportQt VERSION 1.0.0.4 LANGUAGES CXX)
 
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)

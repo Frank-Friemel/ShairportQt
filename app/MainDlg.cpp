@@ -1641,8 +1641,8 @@ void MainDlg::OnAbout()
     QPixmap pixmap(":/ShairportQt.ico");
     labelPixmap->setPixmap(pixmap.scaled(64, 64));
 
-    // search for regular expression "1[., ]+0[., ]+0[., ]+3"
-    QPointer<QLabel> versionLabel = new QLabel(tr("<p><a href=\"https://github.com/Frank-Friemel/ShairportQt\">ShairportQt</a> 1.0.0.3</p>"));
+    // search for regular expression "1[., ]+0[., ]+0[., ]+\d"
+    QPointer<QLabel> versionLabel = new QLabel(tr("<p><a href=\"https://github.com/Frank-Friemel/ShairportQt\">ShairportQt</a> 1.0.0.4</p>"));
 
     dlg->connect(versionLabel, &QLabel::linkActivated, [](QString link)
         {
