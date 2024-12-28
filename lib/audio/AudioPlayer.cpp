@@ -238,8 +238,9 @@ void WavePlayThread::Init(ULONG nFreq /*= 44100*/, ULONG nChannels /*= 2*/, ULON
 bool WavePlayThread::Alloc(shared_ptr<CWaveQueueItem>& pItem)
 {
 	if (pItem)
+	{
 		pItem.reset();
-
+	}
 	if (!m_pool.empty())
 	{
 		pItem = move(m_pool.front());
@@ -390,7 +391,9 @@ bool WavePlayThread::OnEvent()
 			shared_ptr<CWaveQueueItem> pItem;
 
 			if (!Alloc(pItem))
+			{
 				break;
+			}
 			result = m_callback(pItem->m_Blob.data(), pItem->m_nLen);
 
 			if (pItem->Prepare(m_hWaveOut))

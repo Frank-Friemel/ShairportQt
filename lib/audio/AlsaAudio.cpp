@@ -343,7 +343,9 @@ future<int> AlsaAudio::Play(const void* buf, size_t bufsize, string device /*= "
                         player.play_interleaved(buffer, total > params.GetBufSize() ? params.GetBufSize() : total);
 
                         if (total <= params.GetBufSize())
+                        {
                             break;
+                        }
 
                         total -= params.GetBufSize();
                         buffer += params.GetBufSize();

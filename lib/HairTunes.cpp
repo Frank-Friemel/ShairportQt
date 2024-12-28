@@ -9,7 +9,7 @@
 #include "SuspendInhibitor.h"
 
 using namespace std;
-using namespace string_literals;
+using namespace literals;
 
 namespace alac
 {
@@ -581,7 +581,10 @@ void HairTunes::RunQueue() noexcept
     {
         while (streamPCM->GetSize())
         {
-            this_thread::sleep_for(5ms);
+            if (playAudio.wait_for(5ms) == future_status::ready)
+            {
+                break;
+            }
         }
     }
 }
