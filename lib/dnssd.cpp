@@ -6,7 +6,7 @@
 #include "libutils.h"
 #include "Networking.h"
 
-static uint8_t TxtLen(const char* txt);
+static uint8_t TxtLen(const char* txt) noexcept;
 static char* DnsParseDomainName(char* p, char** x) noexcept;
 
 #ifndef _WIN32
@@ -48,7 +48,7 @@ private:
                                                     uint16_t                            port,
                                                     uint16_t                            txtLen,
                                                     const void*                         txtRecord,    /* may be NULL */
-                                                    DNSServiceRegisterReply             callBack,      /* may be NULL */
+                                                    DNSServiceRegisterReply             callBack,     /* may be NULL */
                                                     void*                               context       /* may be NULL */
                                                 );
     typedef void (DNSSD_API *_typeDNSServiceRefDeallocate)(DNSServiceRef sdRef);
@@ -224,13 +224,10 @@ DnsHandlePtr DnsSD::CreateRaopServiceFromConfig(const SharedPtr<IValueCollection
                                 !VariantValue::Key("Password").Get<string>(config).empty();
     const auto hwAddr = VariantValue::Key("HWaddress").Get<vector<uint8_t>>(config);
     const auto apName = VariantValue::Key("APname").Get<string>(config);
-    uint16_t port = SWAP16(VariantValue::Key("RaopPort").Get<uint16_t>(config));
+    const uint16_t port = SWAP16(VariantValue::Key("RaopPort").Get<uint16_t>(config));
 
-    string name = EncodeToHex(hwAddr, true);
+    const string name = EncodeToHex(hwAddr, true) + "@"s + apName;
     
-    name += "@";
-    name += apName;
-
 	TXTRecordRef txtRecord;
 
 	m_descriptor->m_funcTXTRecordCreate(&txtRecord, 0, NULL);
@@ -239,13 +236,15 @@ DnsHandlePtr DnsSD::CreateRaopServiceFromConfig(const SharedPtr<IValueCollection
 	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "cn", TxtLen(RAOP_CN), RAOP_CN);
 	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "et", TxtLen(RAOP_ET), RAOP_ET);
 	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "sv", TxtLen(RAOP_SV), RAOP_SV);
+
     if (!hasPassword)
     {
         m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "da", TxtLen(RAOP_DA), RAOP_DA);
     }
 	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "sr", TxtLen(RAOP_SR), RAOP_SR);
 	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "ss", TxtLen(RAOP_SS), RAOP_SS);
-	if (hasPassword) 
+	
+    if (hasPassword) 
     {
 		m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "pw", TxtLen("true"), "true");
 	} 
@@ -255,6 +254,7 @@ DnsHandlePtr DnsSD::CreateRaopServiceFromConfig(const SharedPtr<IValueCollection
 	}
 	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "vn", TxtLen(RAOP_VN), RAOP_VN);
 	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "tp", TxtLen(RAOP_TP), RAOP_TP);
+
     if (!metaInfo)
     {
         m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "md", TxtLen(RAOP_NO_MD), RAOP_NO_MD);
@@ -446,44 +446,44 @@ DnsHandlePtr DnsSD::ServiceQueryRecord(uint32_t interfaceIndex, const string& fu
 
 DnsSDHandle::DnsSDHandle(SharedPtr<DnsSD> dnsSD, void* handle /* = nullptr */, int error /* =0 */)
     : m_dnsSD{ move(dnsSD) }
+    , m_handle{ handle }
+    , m_error{ error }
 {
     assert(m_dnsSD);
-    Init(handle, error);
-}
 
-void DnsSDHandle::Init(void* h, int32_t e)
-{
-    m_handle = h;
-    m_error = e;
-        
     if (m_handle && static_cast<DNSServiceErrorType>(m_error) == kDNSServiceErr_NoError)
     {
         m_processResult = async(launch::async, [this]() -> void
             {
-                int socket = m_dnsSD->m_descriptor->m_funcDNSServiceRefSockFD(static_cast<DNSServiceRef>(m_handle));
+                const int socket = m_dnsSD->m_descriptor->m_funcDNSServiceRefSockFD(static_cast<DNSServiceRef>(m_handle));
+                assert(socket != -1);
 
-                Networking::SetSocketBlockingEnabled(socket, false);
+                if (!Networking::SetSocketBlockingEnabled(socket, false))
+                {
+                    // unexpected!
+                    assert(false);
+                }
 
-                DNSServiceErrorType err;
-
-                do
+                for (;;)
                 {
                     if (m_stop)
                     {
-                        break;
+                        return;
                     }
-                    const int selected = Networking::WaitForIncomingData(socket);
+                    const int dataAvailable = Networking::WaitForIncomingData(socket);
 
-                    if (m_stop || selected < 0)
+                    if (m_stop || dataAvailable < 0)
                     {
-                        break;
+                        return;
                     }
-                    if (select == 0)
+                    if (dataAvailable)
                     {
-                        continue;
+                        if (kDNSServiceErr_NoError != m_dnsSD->m_descriptor->m_funcDNSServiceProcessResult(static_cast<DNSServiceRef>(m_handle)))
+                        {
+                            return;
+                        }
                     }
-                    err = m_dnsSD->m_descriptor->m_funcDNSServiceProcessResult(static_cast<DNSServiceRef>(m_handle));
-                } while (err == kDNSServiceErr_NoError);
+                }
             });
     }
 }
@@ -511,7 +511,17 @@ DnsSDHandle::~DnsSDHandle()
     }
 }
 
-static uint8_t TxtLen(const char* txt)
+bool DnsSDHandle::Succeeded() const noexcept
+{
+    return m_error == kDNSServiceErr_NoError;
+}
+
+int DnsSDHandle::ErrorCode() const noexcept
+{
+    return m_error;
+}
+
+static uint8_t TxtLen(const char* txt) noexcept
 {
     const size_t l = strlen(txt);
     assert(l < 256);
@@ -550,7 +560,11 @@ static char* DnsParseDomainName(char* p, char** x) noexcept
         {
             v16 = (uint16_t*)*x;
             *x = p + (SWAP16(*v16) & 0x3fff);
-            if (compressed == 0) skip += 2;
+            
+            if (compressed == 0)
+            {
+                skip += 2;
+            }
             compressed = 1;
             continue;
         }
@@ -560,6 +574,7 @@ static char* DnsParseDomainName(char* p, char** x) noexcept
         {
             len += dlen;
             name = (char*)realloc(name, len);
+
             if (!name)
             {
                 return nullptr;
@@ -572,9 +587,15 @@ static char* DnsParseDomainName(char* p, char** x) noexcept
             *x += 1;
         }
         name[j] = '\0';
-        if (compressed == 0) skip += (dlen + 1);
 
-        if (dlen == 0) more = 0;
+        if (compressed == 0)
+        {
+            skip += (dlen + 1);
+        }
+        if (dlen == 0)
+        {
+            more = 0;
+        }
         else
         {
             v8 = (uint8_t*)*x;
@@ -582,6 +603,7 @@ static char* DnsParseDomainName(char* p, char** x) noexcept
             {
                 len += 1;
                 name = (char*)realloc(name, len);
+
                 if (!name)
                 {
                     return nullptr;

@@ -48,24 +48,14 @@ public:
     DnsSDHandle(SharedPtr<DnsSD> dnsSD, void* handle = nullptr, int32_t error = 0);
     ~DnsSDHandle();
 
-    bool Succeeded() const noexcept
-    {
-        return m_error == 0;
-    }
-
-    int ErrorCode() const noexcept
-    {
-        return m_error;
-    }
-
-protected:
-    void Init(void* handle, int32_t error);
+    bool Succeeded() const noexcept;
+    int ErrorCode() const noexcept;
 
 protected:
     const SharedPtr<DnsSD>      m_dnsSD;
     std::atomic_bool            m_stop{ false };
-    void*                       m_handle;
-    int32_t                     m_error;
+    void* const                 m_handle;
+    const int32_t               m_error;
     std::future<void>           m_processResult;
 };
 
@@ -78,9 +68,11 @@ class DnsSD
 private:
     class Descriptor;
 
+protected:
+    virtual ~DnsSD();
+
 public:
     DnsSD();
-    ~DnsSD();
     
     DnsHandlePtr CreateRaopServiceFromConfig(const SharedPtr<IValueCollection>& config, bool metaInfo);
     DnsHandlePtr BrowseForService(const char* strRegType, IDnsSDEvents* cb);
