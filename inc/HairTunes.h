@@ -75,7 +75,7 @@ private:
     const SharedPtr<IValueCollection>       m_client;
 
     const std::string                       m_clientID;
-    const int                               m_remoteControlPort;
+    const uint16_t                          m_remoteControlPort;
 
     int                                     m_frameBytes;
     int                                     m_samplingRate;

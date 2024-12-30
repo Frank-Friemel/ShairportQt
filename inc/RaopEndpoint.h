@@ -4,6 +4,7 @@
 #include <vector>
 #include <thread>
 #include <atomic>
+#include <mutex>
 #include "LayerCake.h"
 
 #define RTP_BASE_HEADER_SIZE			0x04
@@ -27,6 +28,7 @@
 namespace sockpp
 {
     class datagram_socket;
+	class sock_address;
 }
 
 #ifdef _WIN32
@@ -199,7 +201,7 @@ private:
 	size_t bufSize;
 };
 
-void PutPacketToPool(std::unique_ptr<RtpPacket>&& p);
+void PutPacketToPool(std::unique_ptr<RtpPacket>&& p) noexcept;
 
 class RtpEndpoint;
 
@@ -212,14 +214,19 @@ public:
 class RtpEndpoint 
 {
 public:
-	RtpEndpoint(IRtpRequestHandler* requestHandler, const std::string& peer);
+	RtpEndpoint(IRtpRequestHandler* requestHandler, const std::string& peer, const uint16_t peerPort = 0);
     ~RtpEndpoint();
 
-	bool SendTo(const void* buf, size_t len, USHORT port) noexcept;
+	bool SendTo(const void* buf, size_t len, uint16_t port) noexcept;
 
 	inline uint16_t GetPort() const noexcept
 	{
 		return m_port;
+	}
+
+	inline bool IsV4() const noexcept
+	{
+		return m_isV4;
 	}
 
 private:
@@ -228,6 +235,10 @@ private:
 private:
 	IRtpRequestHandler*	const       			m_requestHandler;
 	const std::string			       			m_peer;
+	const uint16_t								m_peerPort;
+	std::unique_ptr<sockpp::sock_address>		m_peerAddress;
+	std::unique_ptr<sockpp::datagram_socket>	m_peerSendToSocket;
+	std::mutex									m_mtxSendToSocket;
 	bool										m_isV4;
     std::unique_ptr<std::thread>    			m_thread;
     std::unique_ptr<sockpp::datagram_socket> 	m_socket;

@@ -16,9 +16,9 @@ namespace alac
     typedef struct Decoder Decoder;
 
     Decoder* CreateDecoder(int samplesize, int numchannels, int samplingRate, const vector<int>& fmtpList);
-    void DestroyDecoder(Decoder* alac) noexcept;
+    void DestroyDecoder(Decoder* decoder) noexcept;
 
-    void DecodeFrame(Decoder* alac,
+    void DecodeFrame(Decoder* decoder,
                     unsigned char* inbuffer,
                     void* outbuffer, int* outputsize);
 } // namespace alac
@@ -29,7 +29,7 @@ HairTunes::HairTunes(const SharedPtr<IValueCollection> config, SharedPtr<IValueC
     , m_lowLevelQueue{ VariantValue::Key("LowLevelRTP").Get<size_t>(config) } 
     , m_highLevelQueue{ VariantValue::Key("LowLevelRTP").Get<size_t>(config) +
                         VariantValue::Key("LevelOffsetRTP").Get<size_t>(config) } 
-    , m_remoteControlPort{ VariantValue::Key("control_port").Get<int>(m_client) }
+    , m_remoteControlPort{ VariantValue::Key("control_port").Get<uint16_t>(m_client) }
     , m_clientID{ VariantValue::Key("ID").Get<string>(m_client) }
     , m_decoder{ nullptr }
     , m_stopThread{ false }
@@ -54,7 +54,7 @@ HairTunes::HairTunes(const SharedPtr<IValueCollection> config, SharedPtr<IValueC
     vector<int> fmtpList;
     fmtpList.reserve(12);
 
-    ParseRegEx(fmtp, "[^[:space:]]+"s, [&fmtpList](string s)
+    ParseRegEx(fmtp, "[^[:space:]]+"s, [&fmtpList](const string& s)
     {
         fmtpList.push_back(stoi(s));
         return true;
@@ -108,7 +108,7 @@ HairTunes::HairTunes(const SharedPtr<IValueCollection> config, SharedPtr<IValueC
     // the client ID equals the "peer" address
     assert(!m_clientID.empty());
 
-    m_controlEndpoint   = make_unique<RtpEndpoint>(this, m_clientID);
+    m_controlEndpoint   = make_unique<RtpEndpoint>(this, m_clientID, m_remoteControlPort);
     m_dataEndpoint      = make_unique<RtpEndpoint>(this, m_clientID);
     m_timingEndpoint    = make_unique<RtpEndpoint>(this, m_clientID);
 }
@@ -884,62 +884,64 @@ static const int host_bigendian = 0;
 struct {signed int x:24;} se_struct_24;
 #define SignExtend24(val) (se_struct_24.x = val)
 
-bool allocate_buffers(Decoder *alac)
+bool allocate_buffers(Decoder *decoder)
 {
-    alac->predicterror_buffer_a         = (int32_t*)malloc(alac->setinfo_max_samples_per_frame * 4);
-    alac->predicterror_buffer_b         = (int32_t*)malloc(alac->setinfo_max_samples_per_frame * 4);
+    decoder->predicterror_buffer_a         = (int32_t*)malloc(decoder->setinfo_max_samples_per_frame * 4);
+    decoder->predicterror_buffer_b         = (int32_t*)malloc(decoder->setinfo_max_samples_per_frame * 4);
 
-    alac->outputsamples_buffer_a        = (int32_t*)malloc(alac->setinfo_max_samples_per_frame * 4);
-    alac->outputsamples_buffer_b        = (int32_t*)malloc(alac->setinfo_max_samples_per_frame * 4);
+    decoder->outputsamples_buffer_a        = (int32_t*)malloc(decoder->setinfo_max_samples_per_frame * 4);
+    decoder->outputsamples_buffer_b        = (int32_t*)malloc(decoder->setinfo_max_samples_per_frame * 4);
 
-    alac->uncompressed_bytes_buffer_a   = (int32_t*)malloc(alac->setinfo_max_samples_per_frame * 4);
-    alac->uncompressed_bytes_buffer_b   = (int32_t*)malloc(alac->setinfo_max_samples_per_frame * 4);
+    decoder->uncompressed_bytes_buffer_a   = (int32_t*)malloc(decoder->setinfo_max_samples_per_frame * 4);
+    decoder->uncompressed_bytes_buffer_b   = (int32_t*)malloc(decoder->setinfo_max_samples_per_frame * 4);
 
-    return  alac->predicterror_buffer_a &&
-            alac->predicterror_buffer_b &&
-            alac->outputsamples_buffer_a &&
-            alac->outputsamples_buffer_b &&
-            alac->uncompressed_bytes_buffer_a &&
-            alac->uncompressed_bytes_buffer_b;
+    return  decoder->predicterror_buffer_a &&
+            decoder->predicterror_buffer_b &&
+            decoder->outputsamples_buffer_a &&
+            decoder->outputsamples_buffer_b &&
+            decoder->uncompressed_bytes_buffer_a &&
+            decoder->uncompressed_bytes_buffer_b;
 }
 
-static void deallocate_buffers(Decoder *alac) noexcept
+static void deallocate_buffers(Decoder* decoder) noexcept
 {
-    free(alac->predicterror_buffer_a);
-    alac->predicterror_buffer_a = nullptr;
+    assert(decoder);
 
-    free(alac->predicterror_buffer_b);
-    alac->predicterror_buffer_b = nullptr;
+    free(decoder->predicterror_buffer_a);
+    decoder->predicterror_buffer_a = nullptr;
 
-    free(alac->outputsamples_buffer_a);
-    alac->outputsamples_buffer_a = nullptr;
+    free(decoder->predicterror_buffer_b);
+    decoder->predicterror_buffer_b = nullptr;
 
-    free(alac->outputsamples_buffer_b);
-    alac->outputsamples_buffer_b = nullptr;
+    free(decoder->outputsamples_buffer_a);
+    decoder->outputsamples_buffer_a = nullptr;
 
-    free(alac->uncompressed_bytes_buffer_a);
-    alac->uncompressed_bytes_buffer_a = nullptr;
+    free(decoder->outputsamples_buffer_b);
+    decoder->outputsamples_buffer_b = nullptr;
 
-    free(alac->uncompressed_bytes_buffer_b);
-    alac->uncompressed_bytes_buffer_b = nullptr;
+    free(decoder->uncompressed_bytes_buffer_a);
+    decoder->uncompressed_bytes_buffer_a = nullptr;
+
+    free(decoder->uncompressed_bytes_buffer_b);
+    decoder->uncompressed_bytes_buffer_b = nullptr;
 }
 
 /* stream reading */
 
 /* supports reading 1 to 16 bits, in big endian format */
-static uint32_t readbits_16(Decoder *alac, int bits)
+static uint32_t readbits_16(Decoder *decoder, int bits)
 {
     uint32_t result;
     int new_accumulator;
 
-    result = (alac->input_buffer[0] << 16) |
-             (alac->input_buffer[1] << 8) |
-             (alac->input_buffer[2]);
+    result = (decoder->input_buffer[0] << 16) |
+             (decoder->input_buffer[1] << 8) |
+             (decoder->input_buffer[2]);
 
     /* shift left by the number of bits we've already read,
      * so that the top 'n' bits of the 24 bits we read will
      * be the return bits */
-    result = result << alac->input_buffer_bitaccumulator;
+    result = result << decoder->input_buffer_bitaccumulator;
 
     result = result & 0x00ffffff;
 
@@ -947,63 +949,63 @@ static uint32_t readbits_16(Decoder *alac, int bits)
      * n is 'bits' */
     result = result >> (24 - bits);
 
-    new_accumulator = (alac->input_buffer_bitaccumulator + bits);
+    new_accumulator = (decoder->input_buffer_bitaccumulator + bits);
 
     /* increase the buffer pointer if we've read over n bytes. */
-    alac->input_buffer += (new_accumulator >> 3);
+    decoder->input_buffer += (new_accumulator >> 3);
 
     /* and the remainder goes back into the bit accumulator */
-    alac->input_buffer_bitaccumulator = (new_accumulator & 7);
+    decoder->input_buffer_bitaccumulator = (new_accumulator & 7);
 
     return result;
 }
 
 /* supports reading 1 to 32 bits, in big endian format */
-static uint32_t readbits(Decoder *alac, int bits)
+static uint32_t readbits(Decoder *decoder, int bits)
 {
     int32_t result = 0;
 
     if (bits > 16)
     {
         bits -= 16;
-        result = readbits_16(alac, 16) << bits;
+        result = readbits_16(decoder, 16) << bits;
     }
 
-    result |= readbits_16(alac, bits);
+    result |= readbits_16(decoder, bits);
 
     return result;
 }
 
 /* reads a single bit */
-static int readbit(Decoder *alac)
+static int readbit(Decoder *decoder)
 {
     int result;
     int new_accumulator;
 
-    result = alac->input_buffer[0];
+    result = decoder->input_buffer[0];
 
-    result = result << alac->input_buffer_bitaccumulator;
+    result = result << decoder->input_buffer_bitaccumulator;
 
     result = result >> 7 & 1;
 
-    new_accumulator = (alac->input_buffer_bitaccumulator + 1);
+    new_accumulator = (decoder->input_buffer_bitaccumulator + 1);
 
-    alac->input_buffer += (new_accumulator / 8);
+    decoder->input_buffer += (new_accumulator / 8);
 
-    alac->input_buffer_bitaccumulator = (new_accumulator % 8);
+    decoder->input_buffer_bitaccumulator = (new_accumulator % 8);
 
     return result;
 }
 
-static void unreadbits(Decoder *alac, int bits)
+static void unreadbits(Decoder *decoder, int bits)
 {
-    int new_accumulator = (alac->input_buffer_bitaccumulator - bits);
+    int new_accumulator = (decoder->input_buffer_bitaccumulator - bits);
 
-    alac->input_buffer += (new_accumulator >> 3);
+    decoder->input_buffer += (new_accumulator >> 3);
 
-    alac->input_buffer_bitaccumulator = (new_accumulator & 7);
-    if (alac->input_buffer_bitaccumulator < 0)
-        alac->input_buffer_bitaccumulator *= -1;
+    decoder->input_buffer_bitaccumulator = (new_accumulator & 7);
+    if (decoder->input_buffer_bitaccumulator < 0)
+        decoder->input_buffer_bitaccumulator *= -1;
 }
 
 /* various implementations of count_leading_zero:
@@ -1099,7 +1101,7 @@ found:
 
 #define RICE_THRESHOLD 8 // maximum number of bits for a rice prefix.
 
-static int32_t entropy_decode_value(Decoder* alac,
+static int32_t entropy_decode_value(Decoder* decoder,
                              int readSampleSize,
                              int k,
                              int rice_kmodifier_mask)
@@ -1107,7 +1109,7 @@ static int32_t entropy_decode_value(Decoder* alac,
     int32_t x = 0; // decoded value
 
     // read x, number of 1s before 0 represent the rice value.
-    while (x <= RICE_THRESHOLD && readbit(alac))
+    while (x <= RICE_THRESHOLD && readbit(decoder))
     {
         x++;
     }
@@ -1117,7 +1119,7 @@ static int32_t entropy_decode_value(Decoder* alac,
         // read the number from the bit stream (raw value)
         int32_t value;
 
-        value = readbits(alac, readSampleSize);
+        value = readbits(decoder, readSampleSize);
 
         // mask value
         value &= (((uint32_t)0xffffffff) >> (32 - readSampleSize));
@@ -1128,7 +1130,7 @@ static int32_t entropy_decode_value(Decoder* alac,
     {
         if (k != 1)
         {
-            int extraBits = readbits(alac, k);
+            int extraBits = readbits(decoder, k);
 
             // x = x * (2^k - 1)
             x *= (((1 << k) - 1) & rice_kmodifier_mask);
@@ -1136,14 +1138,14 @@ static int32_t entropy_decode_value(Decoder* alac,
             if (extraBits > 1)
                 x += extraBits - 1;
             else
-                unreadbits(alac, 1);
+                unreadbits(decoder, 1);
         }
     }
 
     return x;
 }
 
-static void entropy_rice_decode(Decoder* alac,
+static void entropy_rice_decode(Decoder* decoder,
                          int32_t* outputBuffer,
                          int outputSize,
                          int readSampleSize,
@@ -1168,7 +1170,7 @@ static void entropy_rice_decode(Decoder* alac,
         else k = rice_kmodifier;
 
         // note: don't use rice_kmodifier_mask here (set mask to 0xFFFFFFFF)
-        decodedValue = entropy_decode_value(alac, readSampleSize, k, 0xFFFFFFFF);
+        decodedValue = entropy_decode_value(decoder, readSampleSize, k, 0xFFFFFFFF);
 
         decodedValue += signModifier;
         finalValue = (decodedValue + 1) / 2; // inc by 1 and shift out sign bit
@@ -1196,7 +1198,7 @@ static void entropy_rice_decode(Decoder* alac,
             k = count_leading_zeros(history) + ((history + 16) / 64) - 24;
 
             // note: blockSize is always 16bit
-            blockSize = entropy_decode_value(alac, 16, k, rice_kmodifier_mask);
+            blockSize = entropy_decode_value(decoder, 16, k, rice_kmodifier_mask);
 
             // got blockSize 0s
             if (blockSize > 0)
@@ -1497,20 +1499,20 @@ static void deinterlace_24(int32_t *buffer_a, int32_t *buffer_b,
 
 }
 
-void DecodeFrame(Decoder *alac,
-                  unsigned char *inbuffer,
-                  void *outbuffer, int *outputsize)
+void DecodeFrame(Decoder* decoder,
+                  unsigned char* inbuffer,
+                  void* outbuffer, int* outputsize)
 {
     int channels;
-    int32_t outputsamples = alac->setinfo_max_samples_per_frame;
+    int32_t outputsamples = decoder->setinfo_max_samples_per_frame;
 
     /* setup the stream */
-    alac->input_buffer = inbuffer;
-    alac->input_buffer_bitaccumulator = 0;
+    decoder->input_buffer = inbuffer;
+    decoder->input_buffer_bitaccumulator = 0;
 
-    channels = readbits(alac, 3);
+    channels = readbits(decoder, 3);
 
-    *outputsize = outputsamples * alac->bytespersample;
+    *outputsize = outputsamples * decoder->bytespersample;
 
     switch(channels)
     {
@@ -1526,25 +1528,25 @@ void DecodeFrame(Decoder *alac,
         /* 2^result = something to do with output waiting.
          * perhaps matters if we read > 1 frame in a pass?
          */
-        readbits(alac, 4);
+        readbits(decoder, 4);
 
-        readbits(alac, 12); /* unknown, skip 12 bits */
+        readbits(decoder, 12); /* unknown, skip 12 bits */
 
-        hassize = readbits(alac, 1); /* the output sample size is stored soon */
+        hassize = readbits(decoder, 1); /* the output sample size is stored soon */
 
-        uncompressed_bytes = readbits(alac, 2); /* number of bytes in the (compressed) stream that are not compressed */
+        uncompressed_bytes = readbits(decoder, 2); /* number of bytes in the (compressed) stream that are not compressed */
 
-        isnotcompressed = readbits(alac, 1); /* whether the frame is compressed */
+        isnotcompressed = readbits(decoder, 1); /* whether the frame is compressed */
 
         if (hassize)
         {
             /* now read the number of samples,
              * as a 32bit integer */
-            outputsamples = readbits(alac, 32);
-            *outputsize = outputsamples * alac->bytespersample;
+            outputsamples = readbits(decoder, 32);
+            *outputsize = outputsamples * decoder->bytespersample;
         }
 
-        readsamplesize = alac->setinfo_sample_size - (uncompressed_bytes * 8);
+        readsamplesize = decoder->setinfo_sample_size - (uncompressed_bytes * 8);
 
         if (!isnotcompressed)
         { /* so it is compressed */
@@ -1556,19 +1558,19 @@ void DecodeFrame(Decoder *alac,
 
             /* skip 16 bits, not sure what they are. seem to be used in
              * two channel case */
-            readbits(alac, 8);
-            readbits(alac, 8);
+            readbits(decoder, 8);
+            readbits(decoder, 8);
 
-            prediction_type = readbits(alac, 4);
-            prediction_quantitization = readbits(alac, 4);
+            prediction_type = readbits(decoder, 4);
+            prediction_quantitization = readbits(decoder, 4);
 
-            ricemodifier = readbits(alac, 3);
-            predictor_coef_num = readbits(alac, 5);
+            ricemodifier = readbits(decoder, 3);
+            predictor_coef_num = readbits(decoder, 5);
 
             /* read the predictor table */
             for (i = 0; i < predictor_coef_num; i++)
             {
-                predictor_coef_table[i] = (int16_t)readbits(alac, 16);
+                predictor_coef_table[i] = (int16_t)readbits(decoder, 16);
             }
 
             if (uncompressed_bytes)
@@ -1576,23 +1578,23 @@ void DecodeFrame(Decoder *alac,
                 int i;
                 for (i = 0; i < outputsamples; i++)
                 {
-                    alac->uncompressed_bytes_buffer_a[i] = readbits(alac, uncompressed_bytes * 8);
+                    decoder->uncompressed_bytes_buffer_a[i] = readbits(decoder, uncompressed_bytes * 8);
                 }
             }
 
-            entropy_rice_decode(alac,
-                                alac->predicterror_buffer_a,
+            entropy_rice_decode(decoder,
+                                decoder->predicterror_buffer_a,
                                 outputsamples,
                                 readsamplesize,
-                                alac->setinfo_rice_initialhistory,
-                                alac->setinfo_rice_kmodifier,
-                                ricemodifier * alac->setinfo_rice_historymult / 4,
-                                (1 << alac->setinfo_rice_kmodifier) - 1);
+                                decoder->setinfo_rice_initialhistory,
+                                decoder->setinfo_rice_kmodifier,
+                                ricemodifier * decoder->setinfo_rice_historymult / 4,
+                                (1 << decoder->setinfo_rice_kmodifier) - 1);
 
             if (prediction_type == 0)
             { /* adaptive fir */
-                predictor_decompress_fir_adapt(alac->predicterror_buffer_a,
-                                               alac->outputsamples_buffer_a,
+                predictor_decompress_fir_adapt(decoder->predicterror_buffer_a,
+                                               decoder->outputsamples_buffer_a,
                                                outputsamples,
                                                readsamplesize,
                                                predictor_coef_table,
@@ -1613,16 +1615,16 @@ void DecodeFrame(Decoder *alac,
         }
         else
         { /* not compressed, easy case */
-            if (alac->setinfo_sample_size <= 16)
+            if (decoder->setinfo_sample_size <= 16)
             {
                 int i;
                 for (i = 0; i < outputsamples; i++)
                 {
-                    int32_t audiobits = readbits(alac, alac->setinfo_sample_size);
+                    int32_t audiobits = readbits(decoder, decoder->setinfo_sample_size);
 
-                    audiobits = SIGN_EXTENDED32(audiobits, alac->setinfo_sample_size);
+                    audiobits = SIGN_EXTENDED32(audiobits, decoder->setinfo_sample_size);
 
-                    alac->outputsamples_buffer_a[i] = audiobits;
+                    decoder->outputsamples_buffer_a[i] = audiobits;
                 }
             }
             else
@@ -1632,30 +1634,30 @@ void DecodeFrame(Decoder *alac,
                 {
                     int32_t audiobits;
 
-                    audiobits = readbits(alac, 16);
+                    audiobits = readbits(decoder, 16);
                     /* special case of sign extension..
                      * as we'll be ORing the low 16bits into this */
-                    audiobits = audiobits << (alac->setinfo_sample_size - 16);
-                    audiobits |= readbits(alac, alac->setinfo_sample_size - 16);
+                    audiobits = audiobits << (decoder->setinfo_sample_size - 16);
+                    audiobits |= readbits(decoder, decoder->setinfo_sample_size - 16);
                     audiobits = SignExtend24(audiobits);
 
-                    alac->outputsamples_buffer_a[i] = audiobits;
+                    decoder->outputsamples_buffer_a[i] = audiobits;
                 }
             }
             uncompressed_bytes = 0; // always 0 for uncompressed
         }
 
-        switch(alac->setinfo_sample_size)
+        switch(decoder->setinfo_sample_size)
         {
         case 16:
         {
             int i;
             for (i = 0; i < outputsamples; i++)
             {
-                int16_t sample = alac->outputsamples_buffer_a[i];
+                int16_t sample = decoder->outputsamples_buffer_a[i];
                 if (host_bigendian)
                     _Swap16(sample);
-                ((int16_t*)outbuffer)[i * alac->numchannels] = sample;
+                ((int16_t*)outbuffer)[i * decoder->numchannels] = sample;
             }
             break;
         }
@@ -1664,25 +1666,25 @@ void DecodeFrame(Decoder *alac,
             int i;
             for (i = 0; i < outputsamples; i++)
             {
-                int32_t sample = alac->outputsamples_buffer_a[i];
+                int32_t sample = decoder->outputsamples_buffer_a[i];
 
                 if (uncompressed_bytes)
                 {
                     uint32_t mask;
                     sample = sample << (uncompressed_bytes * 8);
                     mask = ~(0xFFFFFFFF << (uncompressed_bytes * 8));
-                    sample |= alac->uncompressed_bytes_buffer_a[i] & mask;
+                    sample |= decoder->uncompressed_bytes_buffer_a[i] & mask;
                 }
 
-                ((uint8_t*)outbuffer)[i * alac->numchannels * 3] = (sample) & 0xFF;
-                ((uint8_t*)outbuffer)[i * alac->numchannels * 3 + 1] = (sample >> 8) & 0xFF;
-                ((uint8_t*)outbuffer)[i * alac->numchannels * 3 + 2] = (sample >> 16) & 0xFF;
+                ((uint8_t*)outbuffer)[i * decoder->numchannels * 3] = (sample) & 0xFF;
+                ((uint8_t*)outbuffer)[i * decoder->numchannels * 3 + 1] = (sample >> 8) & 0xFF;
+                ((uint8_t*)outbuffer)[i * decoder->numchannels * 3 + 2] = (sample >> 16) & 0xFF;
             }
             break;
         }
         case 20:
         case 32:
-            spdlog::debug( "FIXME: unimplemented sample size %i\n", alac->setinfo_sample_size);
+            spdlog::debug( "FIXME: unimplemented sample size %i\n", decoder->setinfo_sample_size);
             break;
         default:
             break;
@@ -1703,25 +1705,25 @@ void DecodeFrame(Decoder *alac,
         /* 2^result = something to do with output waiting.
          * perhaps matters if we read > 1 frame in a pass?
          */
-        readbits(alac, 4);
+        readbits(decoder, 4);
 
-        readbits(alac, 12); /* unknown, skip 12 bits */
+        readbits(decoder, 12); /* unknown, skip 12 bits */
 
-        hassize = readbits(alac, 1); /* the output sample size is stored soon */
+        hassize = readbits(decoder, 1); /* the output sample size is stored soon */
 
-        uncompressed_bytes = readbits(alac, 2); /* the number of bytes in the (compressed) stream that are not compressed */
+        uncompressed_bytes = readbits(decoder, 2); /* the number of bytes in the (compressed) stream that are not compressed */
 
-        isnotcompressed = readbits(alac, 1); /* whether the frame is compressed */
+        isnotcompressed = readbits(decoder, 1); /* whether the frame is compressed */
 
         if (hassize)
         {
             /* now read the number of samples,
              * as a 32bit integer */
-            outputsamples = readbits(alac, 32);
-            *outputsize = outputsamples * alac->bytespersample;
+            outputsamples = readbits(decoder, 32);
+            *outputsize = outputsamples * decoder->bytespersample;
         }
 
-        readsamplesize = alac->setinfo_sample_size - (uncompressed_bytes * 8) + 1;
+        readsamplesize = decoder->setinfo_sample_size - (uncompressed_bytes * 8) + 1;
 
         if (!isnotcompressed)
         { /* compressed */
@@ -1739,33 +1741,33 @@ void DecodeFrame(Decoder *alac,
 
             int i;
 
-            interlacing_shift = readbits(alac, 8);
-            interlacing_leftweight = readbits(alac, 8);
+            interlacing_shift = readbits(decoder, 8);
+            interlacing_leftweight = readbits(decoder, 8);
 
             /******** channel 1 ***********/
-            prediction_type_a = readbits(alac, 4);
-            prediction_quantitization_a = readbits(alac, 4);
+            prediction_type_a = readbits(decoder, 4);
+            prediction_quantitization_a = readbits(decoder, 4);
 
-            ricemodifier_a = readbits(alac, 3);
-            predictor_coef_num_a = readbits(alac, 5);
+            ricemodifier_a = readbits(decoder, 3);
+            predictor_coef_num_a = readbits(decoder, 5);
 
             /* read the predictor table */
             for (i = 0; i < predictor_coef_num_a; i++)
             {
-                predictor_coef_table_a[i] = (int16_t)readbits(alac, 16);
+                predictor_coef_table_a[i] = (int16_t)readbits(decoder, 16);
             }
 
             /******** channel 2 *********/
-            prediction_type_b = readbits(alac, 4);
-            prediction_quantitization_b = readbits(alac, 4);
+            prediction_type_b = readbits(decoder, 4);
+            prediction_quantitization_b = readbits(decoder, 4);
 
-            ricemodifier_b = readbits(alac, 3);
-            predictor_coef_num_b = readbits(alac, 5);
+            ricemodifier_b = readbits(decoder, 3);
+            predictor_coef_num_b = readbits(decoder, 5);
 
             /* read the predictor table */
             for (i = 0; i < predictor_coef_num_b; i++)
             {
-                predictor_coef_table_b[i] = (int16_t)readbits(alac, 16);
+                predictor_coef_table_b[i] = (int16_t)readbits(decoder, 16);
             }
 
             /*********************/
@@ -1774,25 +1776,25 @@ void DecodeFrame(Decoder *alac,
                 int i;
                 for (i = 0; i < outputsamples; i++)
                 {
-                    alac->uncompressed_bytes_buffer_a[i] = readbits(alac, uncompressed_bytes * 8);
-                    alac->uncompressed_bytes_buffer_b[i] = readbits(alac, uncompressed_bytes * 8);
+                    decoder->uncompressed_bytes_buffer_a[i] = readbits(decoder, uncompressed_bytes * 8);
+                    decoder->uncompressed_bytes_buffer_b[i] = readbits(decoder, uncompressed_bytes * 8);
                 }
             }
 
             /* channel 1 */
-            entropy_rice_decode(alac,
-                                alac->predicterror_buffer_a,
+            entropy_rice_decode(decoder,
+                                decoder->predicterror_buffer_a,
                                 outputsamples,
                                 readsamplesize,
-                                alac->setinfo_rice_initialhistory,
-                                alac->setinfo_rice_kmodifier,
-                                ricemodifier_a * alac->setinfo_rice_historymult / 4,
-                                (1 << alac->setinfo_rice_kmodifier) - 1);
+                                decoder->setinfo_rice_initialhistory,
+                                decoder->setinfo_rice_kmodifier,
+                                ricemodifier_a * decoder->setinfo_rice_historymult / 4,
+                                (1 << decoder->setinfo_rice_kmodifier) - 1);
 
             if (prediction_type_a == 0)
             { /* adaptive fir */
-                predictor_decompress_fir_adapt(alac->predicterror_buffer_a,
-                                               alac->outputsamples_buffer_a,
+                predictor_decompress_fir_adapt(decoder->predicterror_buffer_a,
+                                               decoder->outputsamples_buffer_a,
                                                outputsamples,
                                                readsamplesize,
                                                predictor_coef_table_a,
@@ -1805,19 +1807,19 @@ void DecodeFrame(Decoder *alac,
             }
 
             /* channel 2 */
-            entropy_rice_decode(alac,
-                                alac->predicterror_buffer_b,
+            entropy_rice_decode(decoder,
+                                decoder->predicterror_buffer_b,
                                 outputsamples,
                                 readsamplesize,
-                                alac->setinfo_rice_initialhistory,
-                                alac->setinfo_rice_kmodifier,
-                                ricemodifier_b * alac->setinfo_rice_historymult / 4,
-                                (1 << alac->setinfo_rice_kmodifier) - 1);
+                                decoder->setinfo_rice_initialhistory,
+                                decoder->setinfo_rice_kmodifier,
+                                ricemodifier_b * decoder->setinfo_rice_historymult / 4,
+                                (1 << decoder->setinfo_rice_kmodifier) - 1);
 
             if (prediction_type_b == 0)
             { /* adaptive fir */
-                predictor_decompress_fir_adapt(alac->predicterror_buffer_b,
-                                               alac->outputsamples_buffer_b,
+                predictor_decompress_fir_adapt(decoder->predicterror_buffer_b,
+                                               decoder->outputsamples_buffer_b,
                                                outputsamples,
                                                readsamplesize,
                                                predictor_coef_table_b,
@@ -1831,21 +1833,21 @@ void DecodeFrame(Decoder *alac,
         }
         else
         { /* not compressed, easy case */
-            if (alac->setinfo_sample_size <= 16)
+            if (decoder->setinfo_sample_size <= 16)
             {
                 int i;
                 for (i = 0; i < outputsamples; i++)
                 {
                     int32_t audiobits_a, audiobits_b;
 
-                    audiobits_a = readbits(alac, alac->setinfo_sample_size);
-                    audiobits_b = readbits(alac, alac->setinfo_sample_size);
+                    audiobits_a = readbits(decoder, decoder->setinfo_sample_size);
+                    audiobits_b = readbits(decoder, decoder->setinfo_sample_size);
 
-                    audiobits_a = SIGN_EXTENDED32(audiobits_a, alac->setinfo_sample_size);
-                    audiobits_b = SIGN_EXTENDED32(audiobits_b, alac->setinfo_sample_size);
+                    audiobits_a = SIGN_EXTENDED32(audiobits_a, decoder->setinfo_sample_size);
+                    audiobits_b = SIGN_EXTENDED32(audiobits_b, decoder->setinfo_sample_size);
 
-                    alac->outputsamples_buffer_a[i] = audiobits_a;
-                    alac->outputsamples_buffer_b[i] = audiobits_b;
+                    decoder->outputsamples_buffer_a[i] = audiobits_a;
+                    decoder->outputsamples_buffer_b[i] = audiobits_b;
                 }
             }
             else
@@ -1855,18 +1857,18 @@ void DecodeFrame(Decoder *alac,
                 {
                     int32_t audiobits_a, audiobits_b;
 
-                    audiobits_a = readbits(alac, 16);
-                    audiobits_a = audiobits_a << (alac->setinfo_sample_size - 16);
-                    audiobits_a |= readbits(alac, alac->setinfo_sample_size - 16);
+                    audiobits_a = readbits(decoder, 16);
+                    audiobits_a = audiobits_a << (decoder->setinfo_sample_size - 16);
+                    audiobits_a |= readbits(decoder, decoder->setinfo_sample_size - 16);
                     audiobits_a = SignExtend24(audiobits_a);
 
-                    audiobits_b = readbits(alac, 16);
-                    audiobits_b = audiobits_b << (alac->setinfo_sample_size - 16);
-                    audiobits_b |= readbits(alac, alac->setinfo_sample_size - 16);
+                    audiobits_b = readbits(decoder, 16);
+                    audiobits_b = audiobits_b << (decoder->setinfo_sample_size - 16);
+                    audiobits_b |= readbits(decoder, decoder->setinfo_sample_size - 16);
                     audiobits_b = SignExtend24(audiobits_b);
 
-                    alac->outputsamples_buffer_a[i] = audiobits_a;
-                    alac->outputsamples_buffer_b[i] = audiobits_b;
+                    decoder->outputsamples_buffer_a[i] = audiobits_a;
+                    decoder->outputsamples_buffer_b[i] = audiobits_b;
                 }
             }
             uncompressed_bytes = 0; // always 0 for uncompressed
@@ -1874,14 +1876,14 @@ void DecodeFrame(Decoder *alac,
             interlacing_leftweight = 0;
         }
 
-        switch(alac->setinfo_sample_size)
+        switch(decoder->setinfo_sample_size)
         {
         case 16:
         {
-            deinterlace_16(alac->outputsamples_buffer_a,
-                           alac->outputsamples_buffer_b,
+            deinterlace_16(decoder->outputsamples_buffer_a,
+                           decoder->outputsamples_buffer_b,
                            (int16_t*)outbuffer,
-                           alac->numchannels,
+                           decoder->numchannels,
                            outputsamples,
                            interlacing_shift,
                            interlacing_leftweight);
@@ -1889,13 +1891,13 @@ void DecodeFrame(Decoder *alac,
         }
         case 24:
         {
-            deinterlace_24(alac->outputsamples_buffer_a,
-                           alac->outputsamples_buffer_b,
+            deinterlace_24(decoder->outputsamples_buffer_a,
+                           decoder->outputsamples_buffer_b,
                            uncompressed_bytes,
-                           alac->uncompressed_bytes_buffer_a,
-                           alac->uncompressed_bytes_buffer_b,
+                           decoder->uncompressed_bytes_buffer_a,
+                           decoder->uncompressed_bytes_buffer_b,
                            (int16_t*)outbuffer,
-                           alac->numchannels,
+                           decoder->numchannels,
                            outputsamples,
                            interlacing_shift,
                            interlacing_leftweight);
@@ -1903,7 +1905,7 @@ void DecodeFrame(Decoder *alac,
         }
         case 20:
         case 32:
-            spdlog::debug( "FIXME: unimplemented sample size %i\n", alac->setinfo_sample_size);
+            spdlog::debug( "FIXME: unimplemented sample size %i\n", decoder->setinfo_sample_size);
             break;
         default:
             break;
@@ -1952,12 +1954,12 @@ Decoder* CreateDecoder(int samplesize, int numchannels, int samplingRate, const 
     return newfile;
 }
 
-void DestroyDecoder(Decoder* alac) noexcept
+void DestroyDecoder(Decoder* decoder) noexcept
 {
-    if (alac)
+    if (decoder)
     {
-        deallocate_buffers(alac);
-        free(alac);
+        deallocate_buffers(decoder);
+        free(decoder);
     }
 }
 } // namespace alac
