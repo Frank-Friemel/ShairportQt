@@ -12,7 +12,7 @@
 
 namespace alac
 {
-    struct alac_file;
+    struct Decoder;
 };
 
 class HairTunes
@@ -50,6 +50,8 @@ private:
 
     void AlacDecode(std::unique_ptr<RtpPacket>& packet);
 
+    static int16_t ApplyVolumeToChannel(const int16_t in, const double lfVolume, double& e);
+
 private:
     class ResendRequest
     {
@@ -78,7 +80,7 @@ private:
     int                                     m_frameBytes;
     int                                     m_samplingRate;
     
-    alac::alac_file*                        m_decoder = nullptr;
+    alac::Decoder*                          m_decoder = nullptr;
     
     std::atomic_bool                        m_mute;
 
