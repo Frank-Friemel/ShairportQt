@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <memory.h>
 #include <locale>
+#include <chrono>
 #include <string>
 #include <codecvt>
 #include <memory>
@@ -46,10 +47,10 @@ typedef const VARIANT* PCVARIANT;
 #define HIWORD(_dw)     ((WORD)(((_dw) >> 16) & 0xffff))
 #endif
 #ifndef LODWORD
-#define LODWORD(_qw)    ((DWORD)(_qw))
+#define LODWORD(_qw)    ((uint32_t)(_qw))
 #endif
 #ifndef HIDWORD
-#define HIDWORD(_qw)    ((DWORD)(((_qw) >> 32) & 0xffffffff))
+#define HIDWORD(_qw)    ((uint32_t)(((_qw) >> 32) & 0xffffffff))
 #endif
 
 #ifndef LOBYTE

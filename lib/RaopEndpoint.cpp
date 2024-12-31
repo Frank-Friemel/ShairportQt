@@ -8,7 +8,7 @@
 #include "sockpp/sock_address.h"
 
 using namespace std;
-using namespace string_literals;
+using namespace literals;
 
 static mutex mtxPacketPool;
 static list<unique_ptr<RtpPacket>> packetPool;

@@ -165,12 +165,20 @@ void RaopServer::Run() noexcept
 				try
 				{
 #if defined(_DEBUG) && defined(_WIN32)
-					if (request.method != "OPTIONS"s && request.method != "SET_PARAMETER"s)
+					if (request.method != "OPTIONS"s)
 					{
 						string header;
 						for (const auto& hh : request.headers)
 						{
 							header += (hh.first + ":"s + hh.second + "\n"s);
+						}
+						if (request.method == "ANNOUNCE"s ||
+							request.method == "SETUP"s ||
+							request.method == "RECORD"s ||
+							CopyToLower(request.get_header_value("content-type"s)).find("text"s) != string::npos)
+						{
+							header += "\n"s;
+							header += request.body;
 						}
 						spdlog::info("--------\n{}\n{}\n", request.method, header);
 					}

@@ -1,5 +1,6 @@
 #include "libutils.h"
 #include <stdlib.h>
+#include <math.h>
 #include <mutex>
 #include <stdexcept>
 #include <LayerCake.h>
@@ -9,12 +10,12 @@
 using namespace std;
 using namespace literals;
 
-ScopeContext::ScopeContext(const std::function<void()>& scopeCleanup)
+ScopeContext::ScopeContext(const function<void()>& scopeCleanup)
 	: m_scopeCleanup(scopeCleanup)
 {
 	if (!m_scopeCleanup)
 	{
-		throw std::invalid_argument("scopeCleanup");
+		throw invalid_argument("scopeCleanup");
 	}
 }
 
@@ -29,7 +30,7 @@ ScopeContext::~ScopeContext()
 	}
 }
 
-uint32_t CreateRand(uint32_t nMax /*= std::numeric_limits<uint32_t>::max()*/)
+uint32_t CreateRand(uint32_t nMax /*= numeric_limits<uint32_t>::max()*/)
 {
 	return static_cast<uint32_t>((static_cast<double>(nMax) * static_cast<double>(rand())) / static_cast<double>(RAND_MAX));
 }
@@ -188,7 +189,7 @@ bool PutValueToRegistry(void* hKey, const char* pValueName, const char* pValue, 
 	HKEY	h;
 	DWORD	disp = 0;
 	bool	bResult = false;
-	std::string	strKeyName("Software\\ShairportQt");
+	string	strKeyName("Software\\ShairportQt");
 
 	if (strKeyPath)
 	{
@@ -227,4 +228,74 @@ bool RemoveValueFromRegistry(void* hKey, const char* pValueName, const char* str
 	return bResult;
 }
 
+static struct tm* localtime_r(time_t const* const __timer, struct tm* const __tp)
+{
+	localtime_s(__tp, __timer);
+	return __tp;
+}
+
+static struct tm* gmtime_r(time_t const* const __timer, struct tm* const __tp)
+{
+	gmtime_s(__tp, __timer);
+	return __tp;
+}
+
 #endif
+
+static const double g_ntpMicroSecondsFactor = 1000000.0l * pow(2.0l, (-32.0l));
+
+uint64_t ToNTP(const chrono::system_clock::time_point tp) noexcept
+{
+	auto tse = tp.time_since_epoch();
+	uint32_t seconds = static_cast<uint32_t>(chrono::duration_cast<chrono::seconds>(tse).count());
+
+	tse -= chrono::seconds(seconds);
+	const uint32_t fraction = static_cast<double>(chrono::duration_cast<chrono::microseconds>(tse).count()) / g_ntpMicroSecondsFactor;
+
+	// seconds-diff 1900 -> 1970
+	seconds += 0x83AA7E80;
+
+	return MAKEUINT64(seconds, fraction);
+}
+
+chrono::system_clock::time_point FromNTP(const uint64_t ntp) noexcept
+{
+	// seconds-diff 1900 -> 1970
+	const auto seconds = LODWORD(ntp) - 0x83AA7E80;
+	const auto micros = static_cast<uint64_t>(static_cast<double>(HIDWORD(ntp)) * g_ntpMicroSecondsFactor);
+
+	const auto ep = chrono::system_clock::time_point();
+
+	return ep + chrono::seconds(seconds) + chrono::microseconds(micros);
+}
+
+string ToString(const chrono::system_clock::time_point& tp, const bool utc /*= false*/)
+{
+	const time_t t = std::chrono::system_clock::to_time_t(tp);
+
+	tm _tm = { 0 };
+	char buf[256]{ 0 };
+
+	if (utc)
+	{
+		gmtime_r(&t, &_tm);
+		strftime(buf, 256, "%Y-%m-%dT%H:%M:%S+0000", &_tm);
+	}
+	else
+	{
+		localtime_r(&t, &_tm);
+		strftime(buf, 256, "%Y-%m-%dT%H:%M:%S%Ez", &_tm);
+	}
+
+	string result{ buf };
+	const auto i = result.rfind(':');
+
+	if (i != string::npos)
+	{
+		auto tse = tp.time_since_epoch();
+		tse -= chrono::duration_cast<chrono::seconds>(tse);
+
+		result.insert(i+3, "."s + to_string(chrono::duration_cast<chrono::microseconds>(tse).count()));
+	}
+	return result;
+}

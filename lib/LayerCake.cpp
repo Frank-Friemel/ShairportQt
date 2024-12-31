@@ -11,7 +11,7 @@
 #include "internal_rapidjson/writer.h"
 #include "internal_rapidjson/reader.h"
 
-using namespace std::string_literals;
+using namespace std::literals;
 
 #ifdef _WIN32
 

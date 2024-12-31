@@ -136,3 +136,35 @@ TEST(Trim, ParseRegEx)
 
     EXPECT_EQ(result, 4161);
 }
+
+TEST(Trim, NTP)
+{
+    {
+        const uint64_t ntp = ToNTP(chrono::system_clock::time_point());
+        const auto str = ToString(FromNTP(ntp), true);
+
+        EXPECT_EQ(str, "1970-01-01T00:00:00.0+0000"s);
+    }
+    {
+        const auto str = ToString(FromNTP(0xffffffff83AA7E80), true);
+
+        EXPECT_EQ(str, "1970-01-01T00:00:00.999999+0000"s);
+    }
+    {
+        const auto str = ToString(FromNTP(0xffffffffffffffff), true);
+
+        EXPECT_EQ(str, "2036-02-07T06:28:15.999999+0000"s);
+    }
+    {
+        const auto t = time(NULL);
+        const auto now = chrono::system_clock::from_time_t(t);
+
+        const uint64_t ntp = ToNTP(now + 999999us);
+        auto str = ToString(FromNTP(ntp));
+
+        printf("time: %s\n", str.c_str());
+
+        str = ToString(now + 999999us);
+        printf("time: %s\n", str.c_str());
+    }
+}
