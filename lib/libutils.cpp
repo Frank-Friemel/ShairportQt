@@ -262,7 +262,9 @@ chrono::system_clock::time_point FromNTP(const uint64_t ntp) noexcept
 {
 	// seconds-diff 1900 -> 1970
 	const auto seconds = LODWORD(ntp) - 0x83AA7E80;
-	const auto micros = static_cast<uint64_t>(static_cast<double>(HIDWORD(ntp)) * g_ntpMicroSecondsFactor);
+	const double lfMicros = static_cast<double>(HIDWORD(ntp)) * g_ntpMicroSecondsFactor;
+	const auto micros = static_cast<uint64_t>(lfMicros) +
+		(((static_cast<uint64_t>(lfMicros) < 999999) && (static_cast<uint64_t>(lfMicros*100.0l) % 100) == 99) ? 1 : 0);
 
 	const auto ep = chrono::system_clock::time_point();
 

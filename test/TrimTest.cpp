@@ -159,12 +159,26 @@ TEST(Trim, NTP)
         const auto t = time(NULL);
         const auto now = chrono::system_clock::from_time_t(t);
 
+        const uint64_t ntp = ToNTP(now + 500ms);
+        const auto strNTP = ToString(FromNTP(ntp));
+
+        printf("time from ntp       : %s\n", strNTP.c_str());
+
+        const auto strTP = ToString(now + 500ms);
+        printf("time from time_point: %s\n", strTP.c_str());
+        EXPECT_EQ(strNTP, strTP);
+    }
+    {
+        const auto t = time(NULL);
+        const auto now = chrono::system_clock::from_time_t(t);
+
         const uint64_t ntp = ToNTP(now + 999999us);
-        auto str = ToString(FromNTP(ntp));
+        const auto strNTP = ToString(FromNTP(ntp));
 
-        printf("time: %s\n", str.c_str());
+        printf("time from ntp       : %s\n", strNTP.c_str());
 
-        str = ToString(now + 999999us);
-        printf("time: %s\n", str.c_str());
+        const auto strTP = ToString(now + 999999us);
+        printf("time from time_point: %s\n", strTP.c_str());
+        EXPECT_EQ(strNTP, strTP);
     }
 }
