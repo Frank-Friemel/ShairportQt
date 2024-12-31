@@ -242,36 +242,41 @@ static struct tm* gmtime_r(time_t const* const __timer, struct tm* const __tp)
 
 #endif
 
+//
+// The 64-bit binary fixed-point timestamps used by NTP consist of a 32-bit lo-part for seconds and a 32-bit 
+// hi-part for fractional second, giving a time scale that rolls over every 232 seconds (136 years) and a 
+// theoretical resolution of "pow(2, -32)" seconds (~233 picoseconds). NTP uses an epoch of January 1, 1900.
+// Therefore, the first rollover occurs on February 7, 2036
+//
 static const double g_ntpMicroSecondsFactor = 1000000.0l * pow(2.0l, (-32.0l));
 
 uint64_t ToNTP(const chrono::system_clock::time_point tp) noexcept
 {
 	auto tse = tp.time_since_epoch();
-	uint32_t seconds = static_cast<uint32_t>(chrono::duration_cast<chrono::seconds>(tse).count());
+	const auto seconds = chrono::duration_cast<chrono::seconds>(tse);
 
-	tse -= chrono::seconds(seconds);
+	tse -= seconds;
 	const uint32_t fraction = static_cast<double>(chrono::duration_cast<chrono::microseconds>(tse).count()) / g_ntpMicroSecondsFactor;
 
-	// seconds-diff 1900 -> 1970
-	seconds += 0x83AA7E80;
-
-	return MAKEUINT64(seconds, fraction);
+	// seconds-diff 1900 -> 1970 = 0x83AA7E80
+	return MAKEUINT64(static_cast<uint32_t>(seconds.count() + 0x83AA7E80), fraction);
 }
 
 chrono::system_clock::time_point FromNTP(const uint64_t ntp) noexcept
 {
-	// seconds-diff 1900 -> 1970
+	// seconds-diff 1900 -> 1970 = 0x83AA7E80
 	const auto seconds = LODWORD(ntp) - 0x83AA7E80;
 	const double lfMicros = static_cast<double>(HIDWORD(ntp)) * g_ntpMicroSecondsFactor;
 	const auto micros = static_cast<uint64_t>(lfMicros) +
 		(((static_cast<uint64_t>(lfMicros) < 999999) && (static_cast<uint64_t>(lfMicros*100.0l) % 100) == 99) ? 1 : 0);
 
+	// epoch (1970)
 	const auto ep = chrono::system_clock::time_point();
 
 	return ep + chrono::seconds(seconds) + chrono::microseconds(micros);
 }
 
-string ToString(const chrono::system_clock::time_point& tp, const bool utc /*= false*/)
+string ToISO8601String(const chrono::system_clock::time_point& tp, const bool utc /*= false*/)
 {
 	const time_t t = std::chrono::system_clock::to_time_t(tp);
 
@@ -297,7 +302,31 @@ string ToString(const chrono::system_clock::time_point& tp, const bool utc /*= f
 		auto tse = tp.time_since_epoch();
 		tse -= chrono::duration_cast<chrono::seconds>(tse);
 
-		result.insert(i+3, "."s + to_string(chrono::duration_cast<chrono::microseconds>(tse).count()));
+		const auto fraction = chrono::duration_cast<chrono::microseconds>(tse).count();
+
+		if (fraction)
+		{
+			result.insert(i + 3, "."s + to_string(fraction));
+		}
 	}
 	return result;
+}
+
+string ToString(const chrono::system_clock::time_point& tp, const bool utc /*= false*/)
+{
+	const time_t t = std::chrono::system_clock::to_time_t(tp);
+
+	tm _tm = { 0 };
+
+	if (utc)
+	{
+		gmtime_r(&t, &_tm);
+	}
+	else
+	{
+		localtime_r(&t, &_tm);
+	}
+	char buf[256]{ 0 };
+	strftime(buf, 256, "%x %X", &_tm);
+	return buf;
 }

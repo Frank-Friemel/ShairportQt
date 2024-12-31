@@ -141,17 +141,17 @@ TEST(Trim, NTP)
 {
     {
         const uint64_t ntp = ToNTP(chrono::system_clock::time_point());
-        const auto str = ToString(FromNTP(ntp), true);
+        const auto str = ToISO8601String(FromNTP(ntp), true);
 
-        EXPECT_EQ(str, "1970-01-01T00:00:00.0+0000"s);
+        EXPECT_EQ(str, "1970-01-01T00:00:00+0000"s);
     }
     {
-        const auto str = ToString(FromNTP(0xffffffff83AA7E80), true);
+        const auto str = ToISO8601String(FromNTP(0xffffffff83AA7E80), true);
 
         EXPECT_EQ(str, "1970-01-01T00:00:00.999999+0000"s);
     }
     {
-        const auto str = ToString(FromNTP(0xffffffffffffffff), true);
+        const auto str = ToISO8601String(FromNTP(0xffffffffffffffff), true);
 
         EXPECT_EQ(str, "2036-02-07T06:28:15.999999+0000"s);
     }
@@ -160,11 +160,11 @@ TEST(Trim, NTP)
         const auto now = chrono::system_clock::from_time_t(t);
 
         const uint64_t ntp = ToNTP(now + 500ms);
-        const auto strNTP = ToString(FromNTP(ntp));
+        const auto strNTP = ToISO8601String(FromNTP(ntp));
 
         printf("time from ntp       : %s\n", strNTP.c_str());
 
-        const auto strTP = ToString(now + 500ms);
+        const auto strTP = ToISO8601String(now + 500ms);
         printf("time from time_point: %s\n", strTP.c_str());
         EXPECT_EQ(strNTP, strTP);
     }
@@ -173,11 +173,11 @@ TEST(Trim, NTP)
         const auto now = chrono::system_clock::from_time_t(t);
 
         const uint64_t ntp = ToNTP(now + 999999us);
-        const auto strNTP = ToString(FromNTP(ntp));
+        const auto strNTP = ToISO8601String(FromNTP(ntp));
 
         printf("time from ntp       : %s\n", strNTP.c_str());
 
-        const auto strTP = ToString(now + 999999us);
+        const auto strTP = ToISO8601String(now + 999999us);
         printf("time from time_point: %s\n", strTP.c_str());
         EXPECT_EQ(strNTP, strTP);
     }
