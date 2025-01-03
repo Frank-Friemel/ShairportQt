@@ -169,6 +169,10 @@ public:
 	{
 		*(uint32_t *)(&buffer[16]) = SWAP32(nVal);
 	}
+	inline uint32_t getRtpSync() const noexcept
+	{
+		return SWAP32(*(uint32_t*)(&buffer[16]));
+	}
 	inline void setRtpData(uint32_t nVal) noexcept
 	{
 		*(uint32_t *)(&buffer[4]) = SWAP32(nVal);
