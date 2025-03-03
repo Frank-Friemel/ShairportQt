@@ -6,6 +6,9 @@
 #include <LayerCake.h>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/rotating_file_sink.h>
+#include "Trim.h"
+#include <string.h>
+#include <codecvt>
 
 using namespace std;
 using namespace literals;
@@ -330,3 +333,125 @@ string ToString(const chrono::system_clock::time_point& tp, const bool utc /*= f
 	strftime(buf, 256, "%x %X", &_tm);
 	return buf;
 }
+
+#ifdef _WIN32
+
+wstring ErrorToString(uint32_t err, uint32_t languageID /*= 0*/)
+{
+	std::wstring result;
+	PWSTR        buf = NULL;
+
+	::FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS | FORMAT_MESSAGE_ALLOCATE_BUFFER, NULL,
+		err, languageID, (PWSTR)&buf, 0, NULL);
+
+	if (buf)
+	{
+		result = buf;
+		::LocalFree(buf);
+
+		TrimRight(result, L" \t.\r\n"s);
+	}
+	return result;
+}
+
+#else
+
+wstring ErrorToString(uint32_t err, uint32_t languageID /*= 0*/)
+{
+	wstring result;
+	char buf[8192]{};
+
+	const auto c = strerror_r(static_cast<int>(err), buf, sizeof(buf));
+
+	if (c == 0)
+	{
+		wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+		result = converter.from_bytes(buf);
+	}
+	else
+	{
+		switch (err)
+		{
+		case ERROR_SUCCESS:
+		{
+			result = L"Operation succeeded"s;
+		}
+		break;
+
+		case ERROR_FILE_NOT_FOUND:
+		{
+			result = L"File not found"s;
+		}
+		break;		
+
+		case ERROR_ACCESS_DENIED:
+		{
+			result = L"Access denied"s;
+		}
+		break;
+
+		case ERROR_PATH_NOT_FOUND:
+		{
+			result = L"Object could not ne located"s;
+		}
+		break;		
+		
+		case ERROR_INVALID_HANDLE:
+		{
+			result = L"Invalid handle"s;
+		}
+		break;
+
+		case ERROR_NOT_ENOUGH_MEMORY:
+		{
+			result = L"Out of memory"s;
+		}
+		break;
+
+		case ERROR_FILE_EXISTS:
+		{
+			result = L"File exists already"s;
+		}
+		break;
+
+		case ERROR_NO_SUCH_DEVICE:
+		{
+			result = L"No such device"s;
+		}
+		break;
+
+		case ERROR_INVALID_PARAMETER:
+		{
+			result = L"Invalid parameter"s;
+		}
+		break;
+
+		case ERROR_HANDLE_DISK_FULL:
+		{
+			result = L"Disk full"s;
+		}
+		break;
+
+		case ERROR_HANDLE_EOF:
+		{
+			result = L"Invalid seek"s;
+		}
+		break;
+
+		case ERROR_NOT_SUPPORTED:
+		{
+			result = L"Not supported"s;
+		}
+		break;
+
+		case ERROR_IO_INCOMPLETE:
+		{
+			result = L"I/O Incomplete"s;
+		}
+		break;
+		}
+	}
+	return result;
+}
+
+#endif

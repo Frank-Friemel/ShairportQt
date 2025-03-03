@@ -357,9 +357,15 @@ typedef HANDLE              HGLOBAL;
 #define STG_E_SHAREVIOLATION            _HRESULT_TYPEDEF_(0x80030020L)
 #define ERROR_SUCCESS                   0L
 #define ERROR_FILE_NOT_FOUND            2L
-#define ERROR_INVALID_HANDLE            6L
-#define ERROR_HANDLE_EOF                38L
-#define ERROR_HANDLE_DISK_FULL          39L
+#define ERROR_PATH_NOT_FOUND            6L
+#define ERROR_INVALID_HANDLE            9L
+#define ERROR_NOT_ENOUGH_MEMORY         12L
+#define ERROR_ACCESS_DENIED             13L
+#define ERROR_FILE_EXISTS               17L
+#define ERROR_NO_SUCH_DEVICE            19L
+#define ERROR_INVALID_PARAMETER         22L
+#define ERROR_HANDLE_DISK_FULL          28L
+#define ERROR_HANDLE_EOF                29L
 #define ERROR_NOT_SUPPORTED             50L
 #define ERROR_IO_INCOMPLETE             996L
 

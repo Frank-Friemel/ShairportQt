@@ -32,6 +32,12 @@ TEST(Trim, Unicode)
     EXPECT_EQ(utfStringW, unicodeString);
 }
 
+TEST(Trim, ErrorMessage)
+{
+    const auto msg = ErrorToString(ERROR_ACCESS_DENIED);
+    EXPECT_FALSE(msg.empty());
+}
+
 TEST(Trim, ToHex)
 {
     {
