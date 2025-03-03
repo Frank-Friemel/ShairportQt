@@ -26,25 +26,19 @@ std::wstring CA2WEX(const std::string& input, unsigned int cp /*= CP_UTF8*/)
         int lw = la;
 
         result.resize(lw);
+        lw = ::MultiByteToWideChar(cp, 0, input.c_str(), la, result.data(), lw);
 
-        if (!::MultiByteToWideChar(cp, 0, input.c_str(), la, result.data(), lw))
+        if (lw == 0)
         {
-            if (::GetLastError() == ERROR_INSUFFICIENT_BUFFER)
-            {
-                lw = ::MultiByteToWideChar(cp, 0, input.c_str(), la, NULL, 0);
+            assert(::GetLastError() == ERROR_INSUFFICIENT_BUFFER);
 
-                result.resize(lw);
+            lw = ::MultiByteToWideChar(cp, 0, input.c_str(), la, NULL, 0);
 
-                if (!::MultiByteToWideChar(cp, 0, input.c_str(), la, result.data(), lw))
-                {
-                    assert(false);
-                }
-            }
-            else
-            {
-                assert(false);
-            }
+            result.resize(lw);
+            lw = ::MultiByteToWideChar(cp, 0, input.c_str(), la, result.data(), lw);
+            assert(lw > 0);
         }
+        result.resize(lw);
     }
     return result;
 }

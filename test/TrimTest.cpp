@@ -3,6 +3,7 @@
 #include <list>
 #include "libutils.h"
 #include <vector>
+#include <LayerCake.h>
 
 using namespace std;
 using namespace literals;
@@ -19,6 +20,16 @@ TEST(Trim, Basic)
         Trim(t, L" \t\r\n"s);
         EXPECT_EQ(t, L"Test"s);
     }
+}
+
+TEST(Trim, Unicode)
+{
+    const auto unicodeString = L"\x05d3\x05d5\x05e0\x05d3\x05d0\x05e8\x05df\x05de\x05e2"s;
+
+    const auto utfStringA = CW2AEX(unicodeString);
+    const auto utfStringW = CA2WEX(utfStringA);
+
+    EXPECT_EQ(utfStringW, unicodeString);
 }
 
 TEST(Trim, ToHex)
