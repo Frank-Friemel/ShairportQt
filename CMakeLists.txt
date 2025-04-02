@@ -8,6 +8,9 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# enter a CMAKE_PREFIX_PATH eg:
+# set(CMAKE_PREFIX_PATH "<PathToVCPKG>/installed/x64-windows-static/")
+
 # locate packages
 if (UNIX)
     find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets DBus)
@@ -134,4 +137,15 @@ include(CPack)
 
 if (QT_VERSION_MAJOR EQUAL 6)
     qt_finalize_executable(ShairportQt)
+endif()
+
+# add MSVC flags
+if(MSVC)
+    # Ensure static runtime
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    # Force static linkage
+    set(CMAKE_CXX_FLAGS_DEBUG "/MTd")
+    set(CMAKE_CXX_FLAGS_RELEASE "/MT")
+    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "/MT")
+    set(CMAKE_CXX_FLAGS_MINSIZEREL "/MT")
 endif()
