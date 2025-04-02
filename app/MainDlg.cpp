@@ -909,7 +909,10 @@ void MainDlg::OnSetCurrentImage(const char* data, size_t dataLen, string&& image
         }
         else
         {
-            item = make_unique<ImageQueueItem>(QByteArray{ data, static_cast<qsizetype>(dataLen) }, std::move(imageType));
+            // next line gives an error in visual studio C++ compiler: narrowing...
+            // item = make_unique<ImageQueueItem>(QByteArray{ data, static_cast<qsizetype>(dataLen) }, std::move(imageType));
+            // corrected line
+            item = make_unique<ImageQueueItem>(QByteArray{ data, static_cast<int>(dataLen) }, std::move(imageType));
         }
         {
             const lock_guard<mutex> guard(m_mtx);
