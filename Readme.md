@@ -81,6 +81,17 @@ When you have issues with `ShairportQt` please provide following informations:
 - `sockpp`
 - `qtbase`
 - `gtest`
+Remark: for Windows x64 Visual Studio these packages need to be build with static extension: so
+vcpkg.exe install openssl --triplet x64-windows-static
+vcpkg.exe install spdlog --triplet x64-windows-static
+vcpkg.exe install sockpp --triplet x64-windows-static
+vcpkg.exe install qt5-base --triplet x64-windows-static
+vcpkg.exe install gtest --triplet x64-windows-static
+
+for windows you need to add a CMAKE_PREFIX_PATH 
+eg: set(CMAKE_PREFIX_PATH "<PathToCVPKG>/vcpkg/installed/x64-windows-static/")
+
+If a RelWithDebInfo - profile is created in the CMakesSettings.json -> delete the profile
 
 I recommend to use `vcpkg` in order to get them.
 It works very well on Linux and Windows.
