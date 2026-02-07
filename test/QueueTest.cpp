@@ -36,7 +36,7 @@ TEST(Queuetest, ConditionTiming)
 	helperThread.join();
 
 	// we expect the condition check occured two times
-	EXPECT_EQ(conditionChangedCounter, 2);
+	EXPECT_EQ(conditionChangedCounter, 3);
 
 	// the absolute waiting time is expect ~1000ms (although the wait had been interrupted one time)
 	EXPECT_LT(abs((chrono::duration_cast<chrono::milliseconds>(stop - start) - 1000ms).count()), 50);

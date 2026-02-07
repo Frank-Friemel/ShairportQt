@@ -982,7 +982,7 @@ void MainDlg::OnDNSServiceBrowseReply(
                 string	regType{ regtype ? regtype : ""s };
                 string	replyDomain{ replydomain ? replydomain : ""s };
 
-                spdlog::info("Main Dialog: OnDNSServiceBrowseReply registered: {}.{}{}"s, serviceName, regType, replydomain);
+                spdlog::info("Main Dialog: OnDNSServiceBrowseReply registered: {}.{}{}", serviceName, regType, replydomain);
 
                 // try to lookup an existing entry
                 DacpServicePtr dacpService;
@@ -1038,7 +1038,7 @@ void MainDlg::OnDNSServiceBrowseReply(
             }
             else
             {
-                spdlog::info("Main Dialog: OnDNSServiceBrowseReply unregistered: {}"s, serviceName);
+                spdlog::info("Main Dialog: OnDNSServiceBrowseReply unregistered: {}", serviceName);
 
                 auto asyncRemove = async(launch::async, [this](const uint64_t dacpID) -> void
                     {

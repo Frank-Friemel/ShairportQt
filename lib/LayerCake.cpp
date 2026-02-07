@@ -2620,7 +2620,7 @@ SharedPtr<IStream> ToJson(const IValueCollection* valueCollection, JsonFormat fo
     
     if (!ToJson(valueCollection, result.p, format))
     {
-        std::runtime_error("failed to create json");
+        throw std::runtime_error("failed to create json");
     }
     result->Seek({}, STREAM_SEEK_SET, nullptr);
     return result;

@@ -47,7 +47,7 @@ public:
                 if (std::cv_status::timeout == m_cv.wait_for(sync, std::chrono::milliseconds(ms)))
                 {
                     assert(sync.owns_lock());
-                    return std::cv_status::timeout;
+                    return _cond() ? std::cv_status::no_timeout : std::cv_status::timeout;
                 }
             }
             assert(sync.owns_lock());
