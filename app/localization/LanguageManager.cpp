@@ -39,13 +39,18 @@ namespace Localization
 
     string LanguageManager::GetString(int id) const
     {
-        if (m_currentLanguage == "de-de"s)
+        if (m_currentLanguage.length() >= 2)
         {
-            return German::GetString(id);
-        }
-        else if (m_currentLanguage == "ja-jp"s)
-        {
-            return Japanese::GetString(id);
+            const auto lang = m_currentLanguage.substr(0,2);
+
+            if (lang == "de"s)
+            {
+                return German::GetString(id);
+            }
+            else if (lang == "ja"s)
+            {
+                return Japanese::GetString(id);
+            }
         }
         return English::GetString(id);
     }
