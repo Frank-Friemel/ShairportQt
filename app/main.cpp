@@ -136,22 +136,15 @@ int main(int argc, char** argv)
         // initializing the config
         InitializeConfig(config);
 
-        if (app)
-        {
-            // create GUI
-            MainDlg mainDialog(config, strConfigName);
+        // create GUI
+        MainDlg mainDialog(app.get(), config, strConfigName);
 
-            // QT best practices:
-            // https://de.slideshare.net/slideshow/how-to-make-your-qt-app-look-native/2622616
-            mainDialog.show();
+        // QT best practices:
+        // https://de.slideshare.net/slideshow/how-to-make-your-qt-app-look-native/2622616
+        mainDialog.show();
 
-            // enter the main loop (which blocks)
-            result = app->exec();
-        }
-        else
-        {
-            assert(false);
-        }
+        // enter the main loop (which blocks)
+        result = app->exec();
 
         // saving the config
         SaveConfig(config);

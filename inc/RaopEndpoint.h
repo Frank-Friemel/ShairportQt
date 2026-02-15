@@ -250,7 +250,7 @@ private:
 class RtpEndpoint 
 {
 public:
-	RtpEndpoint(IRtpRequestHandler* requestHandler, const std::string& peer = {}, const uint16_t peerPort = 0);
+	RtpEndpoint(IRtpRequestHandler* requestHandler = nullptr, const std::string& peer = {}, const uint16_t peerPort = 0);
     ~RtpEndpoint();
 
 	bool SendTo(const void* buf, size_t len) noexcept;

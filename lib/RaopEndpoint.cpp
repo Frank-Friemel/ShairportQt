@@ -45,15 +45,20 @@ static unique_ptr<RtpPacket> GetNewPacketFromPool()
     return make_unique<RtpPacket>();
 }
 
-static uint16_t GetUniquePortNumber()
+static uint16_t GetUniquePortNumber(bool localOnly)
 {
     sockpp::socket_initializer::initialize();
     static atomic_uint16_t src{ 6000 };
-    const auto result = src++;
+    static atomic_uint16_t localSrc{ 55000 };
+    const auto result = localOnly ? localSrc++ : src++;
 
-	if (result == 12000)
+	if (src >= 12000)
     {
 		src = 6000;
+    }
+	if (localSrc >= 63000)
+    {
+		localSrc = 55000;
     }
 	return result;
 }
@@ -66,11 +71,11 @@ RtpEndpoint::RtpEndpoint(IRtpRequestHandler* requestHandler, const string& peer 
     , m_port { 0 }
     , m_stop{ false }
 {
-    assert(m_requestHandler);
     assert(!m_peer.empty());
+    const bool localOnly = peer.empty();
 
     // call "GetUniquePortNumber" here - which will invoke "socket_initializer"
-    uint16_t port = GetUniquePortNumber();
+    uint16_t port = GetUniquePortNumber(localOnly);
 
     try
     {
@@ -120,13 +125,13 @@ RtpEndpoint::RtpEndpoint(IRtpRequestHandler* requestHandler, const string& peer 
         }
     }
 
-    for (int i = 0; i < 1024; ++i, port = GetUniquePortNumber())
+    for (int i = 0; i < 1024; ++i, port = GetUniquePortNumber(localOnly))
     {
         unique_ptr<sockpp::sock_address> addr;
 
         if (m_isV4)
         {
-            addr = peer.empty() ? make_unique<sockpp::inet_address>(m_peer, port) : make_unique<sockpp::inet_address>(port);
+            addr = localOnly ? make_unique<sockpp::inet_address>(m_peer, port) : make_unique<sockpp::inet_address>(port);
             m_socket = make_unique<sockpp::udp_socket>();
 
         }
@@ -204,7 +209,14 @@ void RtpEndpoint::Run() noexcept
             }
             packet->resize(size);
 
-            m_requestHandler->OnRequest(this, move(packet));
+            if (m_requestHandler)
+            {
+                m_requestHandler->OnRequest(this, move(packet));
+            }
+            else
+            {
+                PutPacketToPool(move(packet));
+            }
         }
     }
     catch(...)

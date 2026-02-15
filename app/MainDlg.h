@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QApplication>
 #include <QLabel>
 #include <QMenuBar>
 #include <QGroupBox>
@@ -47,7 +48,7 @@ class MainDlg
     Q_OBJECT
 
 public:
-    MainDlg(const SharedPtr<IValueCollection>& config, const std::string& configName);
+    MainDlg(const QApplication* app, const SharedPtr<IValueCollection>& config, const std::string& configName);
     ~MainDlg();
 
 private:
@@ -106,6 +107,7 @@ signals:
     void ShowAdArt();
     void ShowToastMessage();
     void ActivateWindow();
+    void HideWindow();
 
 private slots:
     void OnQuit();
@@ -124,7 +126,8 @@ private slots:
     void OnUpdateTray();
     void OnShowToastMessage();
     void OnActivateWindow();
-    
+    void OnHideWindow();
+
 #if Q_MOC_OUTPUT_REVISION <= 67
     void OnSettingTitleInfoView(int state);
 #else
@@ -136,6 +139,7 @@ private:
     using ImageQueueItemPtr = std::unique_ptr<ImageQueueItem>;
     using TimePoint = std::chrono::steady_clock::time_point;
 
+    const QApplication*                 m_app;
     const SharedPtr<IValueCollection>  	m_config;
     const std::string                   m_strConfigName;
     const SharedPtr<DnsSD>              m_dnsSD;

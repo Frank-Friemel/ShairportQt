@@ -24,8 +24,9 @@
 using namespace std;
 using namespace literals;
 
-MainDlg::MainDlg(const SharedPtr<IValueCollection>& config, const std::string& configName)
-    : m_config{ config }
+MainDlg::MainDlg(const QApplication* app, const SharedPtr<IValueCollection>& config, const std::string& configName)
+    : m_app{ app }
+    , m_config{ config }
     , m_strConfigName{ configName }
     , m_dnsSD{ MakeShared<DnsSD>() }
     , m_iconShairportQt{ ":/ShairportQt.ico" }
@@ -33,6 +34,8 @@ MainDlg::MainDlg(const SharedPtr<IValueCollection>& config, const std::string& c
     , m_iconPause{ ":/pause.png" }
     , m_handleKeyboardHook{ KeyboardHook::Setup(this) }
 {
+    assert(m_app);
+
     if (VariantValue::Key("GlobalInstanceHandler").TryGet<bool>(config).value_or(true))
     {
         // connect to global instance object
@@ -46,14 +49,11 @@ MainDlg::MainDlg(const SharedPtr<IValueCollection>& config, const std::string& c
 
             if (port)
             {
-                auto prAnswer = make_shared<promise<bool>>();
-                auto answer = prAnswer->get_future();
+                RtpEndpoint notifier;
 
-                RtpRequestHandler handler(std::move(prAnswer));
-                RtpEndpoint endpointSender(&handler, ""s, *port);
-
-                if (endpointSender.SendTo("show", 4))
+                if (notifier.SendTo("show", 4, *port))
                 {
+                    // we've notified the main instance successfully -> terminate this instance
                     spdlog::info("successfully signaled 'show' to instance memory: {} on Port: {}", instanceName, *port);
                     m_instance->detach();
                     throw runtime_error("main instance notified");
@@ -78,7 +78,7 @@ MainDlg::MainDlg(const SharedPtr<IValueCollection>& config, const std::string& c
             *port = m_instanceEndpoint->GetPort();
             spdlog::debug("successfully created instance memory: {} on Port: {}", instanceName,
                 m_instanceEndpoint->GetPort());
-       }
+        }
         else
         {
             spdlog::error("failed to create to instance memory: {}", instanceName);
@@ -113,6 +113,7 @@ MainDlg::MainDlg(const SharedPtr<IValueCollection>& config, const std::string& c
     connect(this, &MainDlg::ShowAdArt, this, &MainDlg::OnShowAdArt);
     connect(this, &MainDlg::ShowToastMessage, this, &MainDlg::OnShowToastMessage);
     connect(this, &MainDlg::ActivateWindow, this, &MainDlg::OnActivateWindow);
+    connect(this, &MainDlg::HideWindow, this, &MainDlg::OnHideWindow);
 
     setWindowIcon(QIcon(":/ShairportQt.png"));
     setWindowTitle(tr("Shairport"));
@@ -1513,7 +1514,10 @@ void MainDlg::OnQuit()
     {
         m_systemTray->hide();
     }
+    m_app->setQuitOnLastWindowClosed(true);
+    SIGNAL(m_app->aboutToQuit());
     close();
+    m_app->quit();
 }
 
 // Widget override: the dialog is closing -> end/shtutdown
@@ -1633,12 +1637,32 @@ void MainDlg::showEvent(QShowEvent* event)
     m_isHidden = false;
     spdlog::debug("showEvent");
 
-    if (m_firstShowEvent && VariantValue::Key("StartMinimized").TryGet<bool>(m_config).value_or(false))
+    const bool firstShowEvent = m_firstShowEvent;
+
+    if (firstShowEvent)
     {
-        spdlog::info("start minimized");
-        setWindowState(Qt::WindowMinimized);
+        m_firstShowEvent = false;
+    
+        if (VariantValue::Key("StartMinimized").TryGet<bool>(m_config).value_or(false))
+        {
+            spdlog::info("start minimized");
+            setWindowState(Qt::WindowMinimized);
+
+            // only hide Window, if we do have a tray icon
+            // otherwise we won't be able to restore the Window again
+            if (QSystemTrayIcon::isSystemTrayAvailable() &&
+                VariantValue::Key("TrayIcon").TryGet<bool>(m_config).value_or(true))
+            {
+                auto asyncHideWindow = async(launch::async, [this]() -> void
+                {
+                    this_thread::sleep_for(100ms);
+                    HideWindow();
+                });
+                const lock_guard<mutex> guard(m_mtx);
+                m_listAsyncOperations.emplace_back(std::move(asyncHideWindow));
+            }
+        }
     }
-    m_firstShowEvent = false;
     emit UpdateWidgets();
     QWidget::showEvent(event);
 }
@@ -1649,6 +1673,13 @@ void MainDlg::hideEvent(QHideEvent* event)
     m_isHidden = true;
     spdlog::debug("hideEvent");
     QWidget::hideEvent(event);
+}
+
+// Widget slot: HideWindow
+void MainDlg::OnHideWindow()
+{
+    // show the main dialog
+    hide();
 }
 
 // Widget slot: ActivateWindow

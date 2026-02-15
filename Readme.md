@@ -120,8 +120,9 @@ ShairportQt offers a tray icon which may be
 disabled. If the function `Show "Now Playing" in Tray` is switched on, title information will only appear in
 the tray if the main window is not visible on the desktop.
 To completely hide/restore the main window from the taskbar you have to click
-on the tray icon (for `Windows` users, it's a double click). A tray menu
-will show up when you right click on the tray icon.
+on the tray icon (for `Windows` users, a double click may work as well). A tray menu
+will show up when you right click on the tray icon. The option "Start minimized" will
+minimize the application window to the tray, if the tray icon is enabled.
 
 The multimedia buttons at the bottom of the main window are being used to remotely control
 your connected device. This also applies to the volume buttons, so it's
