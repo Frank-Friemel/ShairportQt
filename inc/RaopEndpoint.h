@@ -5,6 +5,9 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <memory>
+#include <future>
+#include <list>
 #include "LayerCake.h"
 
 #define RTP_BASE_HEADER_SIZE			0x04
@@ -215,10 +218,39 @@ public:
 	virtual void OnRequest(RtpEndpoint* endpoint, std::unique_ptr<RtpPacket>&& packet) = 0;
 };
 
+class RtpRequestHandler
+    : public IRtpRequestHandler
+{
+public:
+    RtpRequestHandler() = default;
+    RtpRequestHandler(std::shared_ptr<std::promise<bool>>&& p)
+        : promiseRequestReceived{ std::move(p) }
+    {
+        assert(promiseRequestReceived);
+    }
+
+protected:
+	void OnRequest(RtpEndpoint*, std::unique_ptr<RtpPacket>&& packet) override
+    {
+        packetList.emplace_back(move(packet));
+
+        if (promiseRequestReceived)
+        {
+            promiseRequestReceived->set_value(true);
+        }
+    }
+
+public:
+    std::list<std::unique_ptr<RtpPacket>> packetList;
+
+private:
+    const std::shared_ptr<std::promise<bool>> promiseRequestReceived;
+};
+
 class RtpEndpoint 
 {
 public:
-	RtpEndpoint(IRtpRequestHandler* requestHandler, const std::string& peer, const uint16_t peerPort = 0);
+	RtpEndpoint(IRtpRequestHandler* requestHandler, const std::string& peer = {}, const uint16_t peerPort = 0);
     ~RtpEndpoint();
 
 	bool SendTo(const void* buf, size_t len, uint16_t port) noexcept;

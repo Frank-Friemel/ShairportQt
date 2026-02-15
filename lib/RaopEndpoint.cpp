@@ -58,9 +58,9 @@ static uint16_t GetUniquePortNumber()
 	return result;
 }
 
-RtpEndpoint::RtpEndpoint(IRtpRequestHandler* requestHandler, const string& peer, const uint16_t peerPort /*= 0*/)
+RtpEndpoint::RtpEndpoint(IRtpRequestHandler* requestHandler, const string& peer /*= {}*/, const uint16_t peerPort /*= 0*/)
     : m_requestHandler{ requestHandler }
-    , m_peer{ peer }
+    , m_peer{ peer.empty() ? "127.0.0.1"s : peer }
     , m_peerPort{ peerPort }
     , m_isV4{ true }
     , m_port { 0 }
@@ -126,7 +126,7 @@ RtpEndpoint::RtpEndpoint(IRtpRequestHandler* requestHandler, const string& peer,
 
         if (m_isV4)
         {
-            addr = make_unique<sockpp::inet_address>(port);
+            addr = peer.empty() ? make_unique<sockpp::inet_address>(m_peer, port) : make_unique<sockpp::inet_address>(port);
             m_socket = make_unique<sockpp::udp_socket>();
 
         }

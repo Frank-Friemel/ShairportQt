@@ -33,6 +33,57 @@ MainDlg::MainDlg(const SharedPtr<IValueCollection>& config, const std::string& c
     , m_iconPause{ ":/pause.png" }
     , m_handleKeyboardHook{ KeyboardHook::Setup(this) }
 {
+    if (VariantValue::Key("GlobalInstanceHandler").TryGet<bool>(config).value_or(true))
+    {
+        // connect to global instance object
+        const auto instanceName = "ShairportQt_"s + EncodeToHex(VariantValue::Key("HWaddress").Get<vector<uint8_t>>(config), true);
+        m_instance = new QSharedMemory(instanceName.c_str(), this);
+        
+        if (m_instance->attach())
+        {
+            spdlog::debug("successfully attached to instance memory: {}", instanceName);
+            const uint16_t* port = static_cast<const uint16_t*>(m_instance->constData());
+
+            if (port)
+            {
+                auto prAnswer = make_shared<promise<bool>>();
+                auto answer = prAnswer->get_future();
+
+                RtpRequestHandler handler(std::move(prAnswer));
+                RtpEndpoint endpointSender(&handler, ""s, *port);
+
+                if (endpointSender.SendTo("show", 4, *port))
+                {
+                    spdlog::info("successfully signaled 'show' to instance memory: {} on Port: {}", instanceName, *port);
+                    m_instance->detach();
+                    throw runtime_error("main instance notified");
+                }
+                else
+                {
+                    spdlog::error("failed to send 'show'");
+                }
+            }
+            else
+            {
+                spdlog::error("failed to get memory-data");
+            }
+            m_instance->detach();
+        }
+        if (m_instance->create(sizeof(uint16_t)))
+        {
+            uint16_t* port = static_cast<uint16_t*>(m_instance->data());
+            assert(port);
+
+            m_instanceEndpoint = make_unique<RtpEndpoint>(this);
+            *port = m_instanceEndpoint->GetPort();
+            spdlog::debug("successfully created instance memory: {} on Port: {}", instanceName,
+                m_instanceEndpoint->GetPort());
+       }
+        else
+        {
+            spdlog::error("failed to create to instance memory: {}", instanceName);
+        }
+    }
     // pre-create pixmap logo
     {
         QImage surface(tr(":/AdShadow.png"));
@@ -61,6 +112,7 @@ MainDlg::MainDlg(const SharedPtr<IValueCollection>& config, const std::string& c
     connect(this, &MainDlg::ShowAlbumArt, this, &MainDlg::OnAlbumArt);
     connect(this, &MainDlg::ShowAdArt, this, &MainDlg::OnShowAdArt);
     connect(this, &MainDlg::ShowToastMessage, this, &MainDlg::OnShowToastMessage);
+    connect(this, &MainDlg::ActivateWindow, this, &MainDlg::OnActivateWindow);
 
     setWindowIcon(QIcon(":/ShairportQt.png"));
     setWindowTitle(tr("Shairport"));
@@ -1538,6 +1590,27 @@ void MainDlg::closeEvent(QCloseEvent* event)
 
         try
         {
+            m_instanceEndpoint.reset();
+
+            if (m_instance && m_instance->isAttached())
+            {
+                if (!m_instance->detach())
+                {
+                    throw runtime_error("detach returned 'false'");
+                }
+                else
+                {
+                    spdlog::debug("successfully detached from instance memory");
+                }
+            }
+        }
+        catch (const exception& e)
+        {
+            spdlog::error("failed to detach from instance memory: {}", e.what());
+        }
+
+        try
+        {
             const QByteArray geometry = saveGeometry();
 
             if (!geometry.isEmpty())
@@ -1576,6 +1649,39 @@ void MainDlg::hideEvent(QHideEvent* event)
     m_isHidden = true;
     spdlog::debug("hideEvent");
     QWidget::hideEvent(event);
+}
+
+// Widget slot: ActivateWindow
+void MainDlg::OnActivateWindow()
+{
+    // show the main dialog
+    setWindowState(Qt::WindowNoState);
+    show();
+    activateWindow();
+}
+
+void MainDlg::OnRequest(RtpEndpoint*, std::unique_ptr<RtpPacket>&& packet)
+{
+    try
+    {
+        if (packet && packet->size())
+        {
+            const auto command = string((const char*)packet->data(), packet->size());
+
+            spdlog::info("instance command request: {}", command);
+
+            if (command == "show"s)
+            {
+                if (m_isHidden)
+                {
+                    ActivateWindow();
+                }
+            }
+        }
+    }
+    catch(...)
+    { 
+    }
 }
 
 // Keyboard-Hook implementation

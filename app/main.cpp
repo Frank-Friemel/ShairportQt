@@ -174,23 +174,26 @@ int main(int argc, char** argv)
     }
     catch (runtime_error e)
     {
-        spdlog::error("Runtime error: {}", e.what());
-
-        // no message box without having QT initialized, sorry
-        if (app)
+        if (strcmp(e.what(), "main instance notified") != 0)
         {
-            if (strstr(e.what(), "dnssd"))
-            {
-                // Bonjour/Avahi is probably lacking
-                ShowMessageBox(config, StringID::BONJOUR_INSTALL);
-            }
-            else
-            {
-                QMessageBox msgBox;
+            spdlog::error("Runtime error: {}", e.what());
 
-                msgBox.setText(e.what());
-                msgBox.setIcon(QMessageBox::Critical);
-                msgBox.exec();
+            // no message box without having QT initialized, sorry
+            if (app)
+            {
+                if (strstr(e.what(), "dnssd"))
+                {
+                    // Bonjour/Avahi is probably lacking
+                    ShowMessageBox(config, StringID::BONJOUR_INSTALL);
+                }
+                else
+                {
+                    QMessageBox msgBox;
+
+                    msgBox.setText(e.what());
+                    msgBox.setIcon(QMessageBox::Critical);
+                    msgBox.exec();
+                }
             }
         }
     }

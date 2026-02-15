@@ -14,6 +14,7 @@
 #include <QPointer>
 #include <QSystemTrayIcon>
 #include <QAction>
+#include <QSharedMemory>
 
 #include <future>
 #include <atomic>
@@ -25,6 +26,7 @@
 #include <stdint.h>
 #include <LayerCake.h>
 #include "RaopServer.h"
+#include "RaopEndpoint.h"
 #include "Condition.h"
 #include "dnssd.h"
 #include "DacpService.h"
@@ -40,6 +42,7 @@ class MainDlg
     , public IRaopEvents
     , public IDnsSDEvents
     , protected KeyboardHook::ICallback
+    , public IRtpRequestHandler
 {
     Q_OBJECT
 
@@ -88,6 +91,9 @@ protected:
     // Keyboard-Hook implementation
     void OnKeyPressed(KeyboardHook::Key key) noexcept override;
 
+    // IRtpRequestHandler implementation
+    void OnRequest(RtpEndpoint*, std::unique_ptr<RtpPacket>&& packet) override;
+
 signals:
     void ShowMessage(int text) const;
     void UpdateMMState() const;
@@ -99,6 +105,7 @@ signals:
     void ShowAlbumArt();
     void ShowAdArt();
     void ShowToastMessage();
+    void ActivateWindow();
 
 private slots:
     void OnQuit();
@@ -116,6 +123,8 @@ private slots:
     void OnShowAdArt();
     void OnUpdateTray();
     void OnShowToastMessage();
+    void OnActivateWindow();
+    
 #if Q_MOC_OUTPUT_REVISION <= 67
     void OnSettingTitleInfoView(int state);
 #else
@@ -204,4 +213,8 @@ private:
     // Tray
     QPointer<QSystemTrayIcon>           m_systemTray;
     TimePoint                           m_timepointTrayContextMenuClosed;
+
+    // global instance handling
+    QPointer<QSharedMemory>             m_instance;
+    std::unique_ptr<RtpEndpoint>        m_instanceEndpoint;
 };

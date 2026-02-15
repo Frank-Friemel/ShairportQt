@@ -7,37 +7,9 @@
 using namespace std;
 using namespace literals;
 
-class RtpRequestHandler
-    : public IRtpRequestHandler
-{
-public:
-    RtpRequestHandler() = default;
-    RtpRequestHandler(std::shared_ptr<std::promise<bool>>&& p)
-        : promiseRequestReceived{ move(p) }
-    {
-        assert(promiseRequestReceived);
-    }
-
-	void OnRequest(RtpEndpoint*, std::unique_ptr<RtpPacket>&& packet) override
-    {
-        packetList.emplace_back(move(packet));
-
-        if (promiseRequestReceived)
-        {
-            promiseRequestReceived->set_value(true);
-        }
-    }
-
-public:
-    list<std::unique_ptr<RtpPacket>> packetList;
-
-private:
-    const std::shared_ptr<std::promise<bool>> promiseRequestReceived;
-};
-
 TEST(EndpointTest, CreateSocketv4Udp)
 {
-    RtpRequestHandler  handler;
+    RtpRequestHandler handler;
     {
         EXPECT_NO_THROW(RtpEndpoint(&handler, "127.0.0.1"s));
     }
@@ -45,7 +17,7 @@ TEST(EndpointTest, CreateSocketv4Udp)
 
 TEST(EndpointTest, CreateSocketv6Udp)
 {
-    RtpRequestHandler  handler;
+    RtpRequestHandler handler;
     {
         EXPECT_NO_THROW(RtpEndpoint(&handler, "::1"s));
     }
@@ -53,7 +25,7 @@ TEST(EndpointTest, CreateSocketv6Udp)
 
 TEST(EndpointTest, Sendv4Udp)
 {
-    RtpRequestHandler  handler;
+    RtpRequestHandler handler;
     {
         RtpEndpoint endpoint(&handler, "127.0.0.1"s);
         EXPECT_TRUE(endpoint.IsV4());
@@ -70,7 +42,7 @@ TEST(EndpointTest, Sendv4Udp)
 
 TEST(EndpointTest, Sendv4UdpToPeerPort)
 {
-    RtpRequestHandler  handler;
+    RtpRequestHandler handler;
     {
         RtpEndpoint endpointReceiver(&handler, "127.0.0.1"s);
         EXPECT_TRUE(endpointReceiver.IsV4());
@@ -96,7 +68,7 @@ TEST(EndpointTest, Sendv4UdpToPeerPortFromWorkerThread)
     auto pr = make_shared<promise<bool>>();
     auto prResult = pr->get_future();
 
-    RtpRequestHandler  handler(move(pr));
+    RtpRequestHandler handler(move(pr));
     {
         RtpEndpoint endpointReceiver(&handler, "127.0.0.1"s);
         EXPECT_TRUE(endpointReceiver.IsV4());
@@ -131,7 +103,7 @@ TEST(EndpointTest, Sendv4UdpToPeerPortFromWorkerThread)
 
 TEST(EndpointTest, Sendv6Udp)
 {
-    RtpRequestHandler  handler;
+    RtpRequestHandler handler;
     {
         RtpEndpoint endpoint(&handler, "::1"s);
 
@@ -149,7 +121,7 @@ TEST(EndpointTest, Sendv6Udp)
 
 TEST(EndpointTest, Sendv6UdpToPeerPort)
 {
-    RtpRequestHandler  handler;
+    RtpRequestHandler handler;
     {
         RtpEndpoint endpointReceiver(&handler, "::1"s);
         EXPECT_FALSE(endpointReceiver.IsV4());
@@ -175,7 +147,7 @@ TEST(EndpointTest, Sendv6UdpToPeerPortFromWorkerThread)
     auto pr = make_shared<promise<bool>>();
     auto prResult = pr->get_future();
 
-    RtpRequestHandler  handler(move(pr));
+    RtpRequestHandler handler(move(pr));
     {
         RtpEndpoint endpointReceiver(&handler, "::1"s);
         EXPECT_FALSE(endpointReceiver.IsV4());
