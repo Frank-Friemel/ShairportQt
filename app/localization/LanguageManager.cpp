@@ -51,14 +51,14 @@ namespace Localization
             {
                 return Japanese::GetString(id);
             }
-        }
-        else if (m_currentLanguage == "es-es"s)
-        {
-            return Spanish::GetString(id);
-        }
-        else if (m_currentLanguage == "ca-es"s)
-        {
-            return Catalan::GetString(id);
+            else if (lang == "es"s)
+            {
+                return Spanish::GetString(id);
+            }
+            else if (lang == "ca"s)
+            {
+                return Catalan::GetString(id);
+            }
         }
         return English::GetString(id);
     }
