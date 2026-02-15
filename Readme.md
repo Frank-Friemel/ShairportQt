@@ -142,12 +142,20 @@ A desktop-link for Bonjour is also completely unnecessary.
 
 On my Raspbian ... I had to install `libavahi-compat-libdnssd-dev`.
 
-- `sudo apt install libavahi-compat-libdnssd-dev`
+```sh
+sudo apt install libavahi-compat-libdnssd-dev
+```
 
-For Linux you may need to enable/start the `avahi-daemon`:
+For other Linux distributions, the package name is different:
 
-- `sudo systemctl enable avahi-daemon`
-- `sudo systemctl start avahi-daemon`
+- **Fedora:** `avahi-compat-libdns_sd`
+
+Also you may need to enable/start the `avahi-daemon`:
+
+```sh
+sudo systemctl enable avahi-daemon
+sudo systemctl start avahi-daemon
+```
 
 On some Linux distributions you may have to install `avahi` via their own desktop installation tool. Please see my
 Video [Installation of ShaiportQt on Suse](https://youtu.be/UIfek93D5Hw).

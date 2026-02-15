@@ -52,6 +52,14 @@ namespace Localization
                 return Japanese::GetString(id);
             }
         }
+        else if (m_currentLanguage == "es-es"s)
+        {
+            return Spanish::GetString(id);
+        }
+        else if (m_currentLanguage == "ca-es"s)
+        {
+            return Catalan::GetString(id);
+        }
         return English::GetString(id);
     }
 
@@ -78,6 +86,8 @@ namespace Localization
         list<string> result;
 
         result.push_back("en-EN"s);
+        result.push_back("es-ES"s);
+        result.push_back("ca-ES"s);
         result.push_back("ja-JP"s);
         result.push_back("de-DE"s);
 

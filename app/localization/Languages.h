@@ -17,4 +17,14 @@ namespace Localization
 	{
 		extern std::string GetString(int id);
 	}
+
+	namespace Spanish
+	{
+		extern std::string GetString(int id);
+	}
+
+	namespace Catalan
+	{
+		extern std::string GetString(int id);
+	}
 }

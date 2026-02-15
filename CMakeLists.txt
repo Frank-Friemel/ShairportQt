@@ -50,7 +50,9 @@ set(LOCALIZATION_SOURCES    app/localization/LanguageManager.cpp
                             app/localization/StringIDs.cpp
                             app/localization/English.cpp
                             app/localization/Japanese.cpp
-                            app/localization/German.cpp)
+                            app/localization/German.cpp
+                            app/localization/Spanish.cpp
+                            app/localization/Catalan.cpp)
 
 set(APP_SOURCES app/main.cpp
                 app/MainDlg.cpp

@@ -1,0 +1,29 @@
+Package: shairport-qt
+Version: 1.0.0.4
+Maintainer: Frank Friemel <frank.friemel@gdata.de>
+Architecture: amd64
+Section: sound,utils,misc
+Priority: optional
+Homepage: https://github.com/Frank-Friemel/ShairportQt
+Installed-Size: 7500
+Depends: libc6 (>= 2.27),
+  libstdc++6,
+  libasound2 | libasound2t64,
+  openssl (>= 3),
+  avahi-daemon,
+  libavahi-compat-libdnssd1,
+  libqt6core6,
+  libqt6dbus6,
+  libqt6gui6,
+  libqt6widgets6
+Build-Depends: libssl-dev (>= 3),
+ libavahi-compat-libdnssd-dev,
+ libasound2-dev (>= 1.2),
+ libspdlog-dev (>= 1),
+ libgtest-dev (>= 1),
+ libgmock-dev (>= 1),
+ sockpp (= 1.0.0),
+ cmake (>= 3.15.0),
+ g++ (>= 11)
+Description: An AirPlay Audio-Receiver for your
+ Personal Computer or ARM-SoC (eg. Raspberry Pi)

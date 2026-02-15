@@ -1,0 +1,59 @@
+name: CI Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          cmake build-essential \
+            libssl-dev libspdlog-dev libgtest-dev libgmock-dev libasound2-dev
+
+    - name: Install sockpp
+      run: |
+        git clone --depth 1 -b v1.0.0 https://github.com/fpagliughi/sockpp.git
+        cd sockpp
+        cmake -B build . \
+          -DCMAKE_INSTALL_PREFIX=/usr \
+          -DSOCKPP_BUILD_STATIC=ON \
+          -DSOCKPP_WITH_OPENSSL=ON
+        cmake --build build
+        sudo cmake --install build
+
+    - name: Set up Qt
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: '6.8.1'
+        target: desktop
+        arch: linux_gcc_64
+
+    - name: Configure CMake
+      run: |
+        cmake -B build -S . \
+          -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build
+      run: cmake --build build
+
+    - name: Run tests
+      run: ./build/ShairportQtTest
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ShairportQt
+        path: build/ShairportQt
+        retention-days: 4
+        if-no-files-found: error
