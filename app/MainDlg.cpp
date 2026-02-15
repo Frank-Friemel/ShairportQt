@@ -52,7 +52,7 @@ MainDlg::MainDlg(const SharedPtr<IValueCollection>& config, const std::string& c
                 RtpRequestHandler handler(std::move(prAnswer));
                 RtpEndpoint endpointSender(&handler, ""s, *port);
 
-                if (endpointSender.SendTo("show", 4, *port))
+                if (endpointSender.SendTo("show", 4))
                 {
                     spdlog::info("successfully signaled 'show' to instance memory: {} on Port: {}", instanceName, *port);
                     m_instance->detach();

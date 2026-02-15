@@ -253,6 +253,7 @@ public:
 	RtpEndpoint(IRtpRequestHandler* requestHandler, const std::string& peer = {}, const uint16_t peerPort = 0);
     ~RtpEndpoint();
 
+	bool SendTo(const void* buf, size_t len) noexcept;
 	bool SendTo(const void* buf, size_t len, uint16_t port) noexcept;
 
 	inline uint16_t GetPort() const noexcept

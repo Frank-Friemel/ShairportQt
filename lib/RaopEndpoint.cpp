@@ -212,6 +212,26 @@ void RtpEndpoint::Run() noexcept
     }
 }
 
+bool RtpEndpoint::SendTo(const void* buf, size_t len) noexcept
+{
+    try
+    {
+        const lock_guard<mutex> guard(m_mtxSendToSocket);
+
+        if (m_peerSendToSocket)
+        {
+            if (m_peerSendToSocket->send(buf, len) == len)
+            {
+                return true;
+            }
+        }
+    }
+    catch (...)
+    {
+    }
+    return false;
+}
+
 bool RtpEndpoint::SendTo(const void* buf, size_t len, uint16_t port) noexcept
 {
     if (port == m_peerPort)
