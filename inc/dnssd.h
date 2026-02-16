@@ -11,6 +11,27 @@
 class IDnsSDEvents
 {
 public:
+    class Service
+    {
+        public:
+            Service( uint32_t interfaceIndex,
+                        const char* serviceName,
+                        const char* regtype,
+                        const char* replyDomain)
+                : m_interfaceIndex{ interfaceIndex }
+                , m_serviceName{ serviceName ? serviceName : "" }
+                , m_regtype{ regtype ? regtype : "" }
+                , m_replyDomain{ replyDomain ? replyDomain : "" }
+            {
+            }
+
+        public:
+            const uint32_t m_interfaceIndex;
+            const std::string m_serviceName;
+            const std::string m_regtype;
+            const std::string m_replyDomain;
+    };
+
     virtual void OnDNSServiceBrowseReply(
         bool registered,
         uint32_t interfaceIndex,
@@ -23,6 +44,7 @@ public:
     }
 
     virtual void OnServiceResolved(
+        void* handle,
         const unsigned char* txtRecord,
         uint16_t txtLen,
         const char* hosttarget,
@@ -50,6 +72,11 @@ public:
 
     bool Succeeded() const noexcept;
     int ErrorCode() const noexcept;
+
+    void* Handle() const noexcept
+    {
+        return m_handle;
+    }
 
 protected:
     const SharedPtr<DnsSD>      m_dnsSD;

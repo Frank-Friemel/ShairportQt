@@ -330,7 +330,7 @@ static void DNSSD_API MyDNSServiceResolveReply
     assert(context);
     IDnsSDEvents* cb = (IDnsSDEvents*)context;
 
-    cb->OnServiceResolved(txtRecord, txtLen, hosttarget, fullname, port);
+    cb->OnServiceResolved(sdRef, txtRecord, txtLen, hosttarget, fullname, port);
 }
 
 DnsHandlePtr DnsSD::ResolveService(uint32_t interfaceIndex,
@@ -455,13 +455,17 @@ DnsSDHandle::DnsSDHandle(SharedPtr<DnsSD> dnsSD, void* handle /* = nullptr */, i
     {
         m_processResult = async(launch::async, [this]() -> void
             {
+                if (m_stop)
+                {
+                    return;
+                }
                 const int socket = m_dnsSD->m_descriptor->m_funcDNSServiceRefSockFD(static_cast<DNSServiceRef>(m_handle));
                 assert(socket != -1);
 
                 if (!Networking::SetSocketBlockingEnabled(socket, false))
                 {
-                    // unexpected!
-                    assert(false);
+                    // unexpected if we don't stop!
+                    assert(m_stop);
                 }
 
                 for (;;)

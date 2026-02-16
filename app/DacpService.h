@@ -32,6 +32,7 @@ public:
 protected:
     // implemenation of IDnsSDEvents
     void OnServiceResolved(
+        void* handle,
         const unsigned char* txtRecord,
         uint16_t txtLen,
         const char* hosttarget,
