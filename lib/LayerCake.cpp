@@ -11,7 +11,7 @@
 #include "internal_rapidjson/writer.h"
 #include "internal_rapidjson/reader.h"
 
-using namespace std::string_literals;
+using namespace std::literals;
 
 #ifdef _WIN32
 
@@ -26,25 +26,19 @@ std::wstring CA2WEX(const std::string& input, unsigned int cp /*= CP_UTF8*/)
         int lw = la;
 
         result.resize(lw);
+        lw = ::MultiByteToWideChar(cp, 0, input.c_str(), la, result.data(), lw);
 
-        if (!::MultiByteToWideChar(cp, 0, input.c_str(), la, result.data(), lw))
+        if (lw == 0)
         {
-            if (::GetLastError() == ERROR_INSUFFICIENT_BUFFER)
-            {
-                lw = ::MultiByteToWideChar(cp, 0, input.c_str(), la, NULL, 0);
+            assert(::GetLastError() == ERROR_INSUFFICIENT_BUFFER);
 
-                result.resize(lw);
+            lw = ::MultiByteToWideChar(cp, 0, input.c_str(), la, NULL, 0);
 
-                if (!::MultiByteToWideChar(cp, 0, input.c_str(), la, result.data(), lw))
-                {
-                    assert(false);
-                }
-            }
-            else
-            {
-                assert(false);
-            }
+            result.resize(lw);
+            lw = ::MultiByteToWideChar(cp, 0, input.c_str(), la, result.data(), lw);
+            assert(lw > 0);
         }
+        result.resize(lw);
     }
     return result;
 }
@@ -2626,7 +2620,7 @@ SharedPtr<IStream> ToJson(const IValueCollection* valueCollection, JsonFormat fo
     
     if (!ToJson(valueCollection, result.p, format))
     {
-        std::runtime_error("failed to create json");
+        throw std::runtime_error("failed to create json");
     }
     result->Seek({}, STREAM_SEEK_SET, nullptr);
     return result;

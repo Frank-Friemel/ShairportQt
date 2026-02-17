@@ -37,9 +37,6 @@ The installation for Linux depends a bit on your Linux distribution.
 I myself am using [`Manjaro-Linux`](https://manjaro.org/)
 which worked out of the box and I would expect the same for all KDE based distributions. You'll need at least `Qt 6.7` installed on your machine.
 
-May be anybody of the Linux Pros can give advice how to improve the installation experience with a `.deb` or `.rpm`
-package. Comments are appreciated.
-
 The [releases](https://github.com/Frank-Friemel/ShairportQt/releases) package contains an installation script. So, for now you need to unpack the
 [zip](https://github.com/Frank-Friemel/ShairportQt/releases) file, open a terminal, change-directory to
 `Linux_x64` and start script `install.sh` as superuser:
@@ -80,6 +77,7 @@ When you have issues with `ShairportQt` please provide following informations:
 - `spdlog`
 - `sockpp`
 - `qtbase`
+- `WinToast`
 - `gtest`
 
 I recommend to use `vcpkg` in order to get them.
@@ -120,8 +118,9 @@ ShairportQt offers a tray icon which may be
 disabled. If the function `Show "Now Playing" in Tray` is switched on, title information will only appear in
 the tray if the main window is not visible on the desktop.
 To completely hide/restore the main window from the taskbar you have to click
-on the tray icon (for `Windows` users, it's a double click). A tray menu
-will show up when you right click on the tray icon.
+on the tray icon (for `Windows` users, a double click may work as well). A tray menu
+will show up when you right click on the tray icon. The option "Start minimized" will
+minimize the application window to the tray, if the tray icon is enabled.
 
 The multimedia buttons at the bottom of the main window are being used to remotely control
 your connected device. This also applies to the volume buttons, so it's

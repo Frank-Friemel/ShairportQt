@@ -136,22 +136,15 @@ int main(int argc, char** argv)
         // initializing the config
         InitializeConfig(config);
 
-        if (app)
-        {
-            // create GUI
-            MainDlg mainDialog(config, strConfigName);
+        // create GUI
+        MainDlg mainDialog(app.get(), config, strConfigName);
 
-            // QT best practices:
-            // https://de.slideshare.net/slideshow/how-to-make-your-qt-app-look-native/2622616
-            mainDialog.show();
+        // QT best practices:
+        // https://de.slideshare.net/slideshow/how-to-make-your-qt-app-look-native/2622616
+        mainDialog.show();
 
-            // enter the main loop (which blocks)
-            result = app->exec();
-        }
-        else
-        {
-            assert(false);
-        }
+        // enter the main loop (which blocks)
+        result = app->exec();
 
         // saving the config
         SaveConfig(config);
@@ -174,23 +167,26 @@ int main(int argc, char** argv)
     }
     catch (runtime_error e)
     {
-        spdlog::error("Runtime error: {}", e.what());
-
-        // no message box without having QT initialized, sorry
-        if (app)
+        if (strcmp(e.what(), "main instance notified") != 0)
         {
-            if (strstr(e.what(), "dnssd"))
-            {
-                // Bonjour/Avahi is probably lacking
-                ShowMessageBox(config, StringID::BONJOUR_INSTALL);
-            }
-            else
-            {
-                QMessageBox msgBox;
+            spdlog::error("Runtime error: {}", e.what());
 
-                msgBox.setText(e.what());
-                msgBox.setIcon(QMessageBox::Critical);
-                msgBox.exec();
+            // no message box without having QT initialized, sorry
+            if (app)
+            {
+                if (strstr(e.what(), "dnssd"))
+                {
+                    // Bonjour/Avahi is probably lacking
+                    ShowMessageBox(config, StringID::BONJOUR_INSTALL);
+                }
+                else
+                {
+                    QMessageBox msgBox;
+
+                    msgBox.setText(e.what());
+                    msgBox.setIcon(QMessageBox::Critical);
+                    msgBox.exec();
+                }
             }
         }
     }

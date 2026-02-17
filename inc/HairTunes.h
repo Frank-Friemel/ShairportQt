@@ -12,7 +12,7 @@
 
 namespace alac
 {
-    struct alac_file;
+    struct Decoder;
 };
 
 class HairTunes
@@ -50,6 +50,8 @@ private:
 
     void AlacDecode(std::unique_ptr<RtpPacket>& packet);
 
+    static int16_t ApplyVolumeToChannel(const int16_t in, const double lfVolume, double& e);
+
 private:
     class ResendRequest
     {
@@ -73,19 +75,19 @@ private:
     const SharedPtr<IValueCollection>       m_client;
 
     const std::string                       m_clientID;
-    const int                               m_remoteControlPort;
+    const uint16_t                          m_remoteControlPort;
 
     int                                     m_frameBytes;
     int                                     m_samplingRate;
     
-    alac::alac_file*                        m_decoder = nullptr;
+    alac::Decoder*                          m_decoder = nullptr;
     
     std::atomic_bool                        m_mute;
 
     std::unique_ptr<std::thread>            m_queueThread;
 
     std::mutex                              m_mtxQueue;
-    Condition                               m_condQueue;
+    ShairportQT::Condition                  m_condQueue;
     std::atomic_bool                        m_stopThread;
     std::atomic_uint                        m_flush;
         
@@ -97,7 +99,7 @@ private:
     std::list<ResendRequestPtr>             m_queueResend;
     std::list<ResendRequestPtr>             m_ringResend;
     std::mutex                              m_mtxResend;
-    Condition                               m_condResend;
+    ShairportQT::Condition                  m_condResend;
     std::unique_ptr<std::thread>            m_threadsResend[2];
 
     const size_t                            m_lowLevelQueue;

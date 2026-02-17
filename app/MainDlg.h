@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QApplication>
 #include <QLabel>
 #include <QMenuBar>
 #include <QGroupBox>
@@ -14,6 +15,7 @@
 #include <QPointer>
 #include <QSystemTrayIcon>
 #include <QAction>
+#include <QSharedMemory>
 
 #include <future>
 #include <atomic>
@@ -25,6 +27,7 @@
 #include <stdint.h>
 #include <LayerCake.h>
 #include "RaopServer.h"
+#include "RaopEndpoint.h"
 #include "Condition.h"
 #include "dnssd.h"
 #include "DacpService.h"
@@ -40,11 +43,12 @@ class MainDlg
     , public IRaopEvents
     , public IDnsSDEvents
     , protected KeyboardHook::ICallback
+    , public IRtpRequestHandler
 {
     Q_OBJECT
 
 public:
-    MainDlg(const SharedPtr<IValueCollection>& config, const std::string& configName);
+    MainDlg(QApplication* app, const SharedPtr<IValueCollection>& config, const std::string& configName);
     ~MainDlg();
 
 private:
@@ -88,6 +92,9 @@ protected:
     // Keyboard-Hook implementation
     void OnKeyPressed(KeyboardHook::Key key) noexcept override;
 
+    // IRtpRequestHandler implementation
+    void OnRequest(RtpEndpoint*, std::unique_ptr<RtpPacket>&& packet) override;
+
 signals:
     void ShowMessage(int text) const;
     void UpdateMMState() const;
@@ -99,6 +106,8 @@ signals:
     void ShowAlbumArt();
     void ShowAdArt();
     void ShowToastMessage();
+    void ActivateWindow();
+    void HideWindow();
 
 private slots:
     void OnQuit();
@@ -116,6 +125,9 @@ private slots:
     void OnShowAdArt();
     void OnUpdateTray();
     void OnShowToastMessage();
+    void OnActivateWindow();
+    void OnHideWindow();
+
 #if Q_MOC_OUTPUT_REVISION <= 67
     void OnSettingTitleInfoView(int state);
 #else
@@ -127,6 +139,7 @@ private:
     using ImageQueueItemPtr = std::unique_ptr<ImageQueueItem>;
     using TimePoint = std::chrono::steady_clock::time_point;
 
+    QApplication* const                 m_app;
     const SharedPtr<IValueCollection>  	m_config;
     const std::string                   m_strConfigName;
     const SharedPtr<DnsSD>              m_dnsSD;
@@ -134,10 +147,14 @@ private:
     std::mutex                          m_mtx;
     DacpID                              m_currentDacpID;
     std::map<uint64_t, DacpServicePtr>  m_mapDacpService;
-    Condition                           m_condDatachange;
+    ShairportQT::Condition              m_condDatachange;
     std::list<ImageQueueItemPtr>        m_imageQueue;
     std::atomic_uint64_t                m_timePointShowAlbumArt{ 0 };
     std::unique_ptr<TimePoint>          m_timePointShowToastMessage;
+#ifdef Q_OS_WIN    
+    bool                                m_bUseWinToast{ false };
+    std::atomic_uint64_t                m_fileImagePostFix{ 0 };
+#endif
     std::atomic_bool                    m_dialogClosed{ false };
     std::atomic_bool                    m_firstShowEvent{ true };
     std::atomic_bool                    m_isHidden{ false };
@@ -204,4 +221,8 @@ private:
     // Tray
     QPointer<QSystemTrayIcon>           m_systemTray;
     TimePoint                           m_timepointTrayContextMenuClosed;
+
+    // global instance handling
+    QPointer<QSharedMemory>             m_instance;
+    std::unique_ptr<RtpEndpoint>        m_instanceEndpoint;
 };

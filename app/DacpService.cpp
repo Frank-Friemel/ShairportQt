@@ -71,6 +71,7 @@ void DacpService::Resolve()
 }
 
 void DacpService::OnServiceResolved(
+    void*,
     const unsigned char* txtrecord,
     uint16_t txtLen,
     const char* hosttarget,
@@ -86,7 +87,7 @@ void DacpService::OnServiceResolved(
         // try calculate the host name by chance
         Trim(hostName, "."s);
 
-        spdlog::info("resolved service {} to: {}, {} - Fullname: {}", m_serviceName, hostTarget, port, fullName);
+        spdlog::info("resolved dacp service {} to: {}, {} - Fullname: {}", m_serviceName, hostTarget, port, fullName);
 
         {
             unique_lock<mutex> sync(m_mtx);
@@ -101,7 +102,7 @@ void DacpService::OnServiceResolved(
                 m_hostName = move(hostName);
             }
             m_resolved = true;
-            m_condResolved.NotifyAndUnlock(sync, Condition::mode::all);
+            m_condResolved.NotifyAndUnlock(sync, ShairportQT::Condition::mode::all);
         }
     }
     catch (const exception& e)

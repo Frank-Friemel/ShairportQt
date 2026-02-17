@@ -13,11 +13,13 @@
 #include "httplib/httplib_raop.h"
 
 #include <future>
+#include <condition_variable>
+#include <thread>
+#include <list>
 #include "dnssd.h"
 
 using namespace std;
-using namespace string_literals;
-using namespace chrono_literals;
+using namespace literals;
 
 static bool DigestOk(const httplib::Request& request, const string& password);
 
@@ -156,6 +158,138 @@ void RaopServer::Run() noexcept
 {
 	try
 	{
+		mutex browseMutex;
+		bool browseStop = false;
+		bool browseForce = false;
+		condition_variable browseCondition;
+		thread browseThread([&]() noexcept {
+
+			unique_lock<mutex> guard{ browseMutex };
+
+			while(!browseStop)
+			{
+				if (!browseForce)
+				{
+					browseCondition.wait_for(guard, 60s);
+				
+					if (browseStop)
+					{
+						return;
+					}
+				}
+				browseForce = false;
+
+				guard.unlock();
+
+				try
+				{
+					class BrowserEvents
+						: public IDnsSDEvents
+					{
+						private:
+							const SharedPtr<DnsSD> m_dnsSD;
+							mutex m_mtx;
+							list<pair<DnsHandlePtr, Service>> m_servicesToResolve;
+						
+						public:
+							BrowserEvents(const SharedPtr<DnsSD>& dnsSD)
+								: m_dnsSD{ dnsSD }
+							{
+								assert(m_dnsSD);
+							}
+
+							~BrowserEvents()
+							{
+								list<pair<DnsHandlePtr, Service>> dropList;
+								{
+									const lock_guard<mutex> guard{ m_mtx };
+									swap(dropList, m_servicesToResolve);
+								}
+							}
+
+						protected:
+							void OnDNSServiceBrowseReply(
+									bool registered,
+									uint32_t interfaceIndex,
+									const char* serviceName,
+									const char* regtype,
+									const char* replyDomain) noexcept override
+							{
+								try
+								{
+									Service s{ interfaceIndex, serviceName, regtype, replyDomain };
+
+									spdlog::debug("{} raop service {} with type {}", 
+										registered ? "registered"s : "unregistered"s, 
+										s.m_serviceName, 
+										s.m_regtype);
+
+									if (registered)
+									{
+										auto h = m_dnsSD->ResolveService(s.m_interfaceIndex, s.m_serviceName, s.m_regtype, s.m_replyDomain, this);
+
+										if (h->Succeeded())
+										{
+											const lock_guard<mutex> guard{ m_mtx };
+											m_servicesToResolve.emplace_back(move(h), move(s));
+										}
+										else
+										{
+											spdlog::error("failed to resolve service {}", s.m_serviceName);
+										}
+									}
+								}
+								catch(const exception& e)
+								{
+									spdlog::error("exception during raop service browsing reply: {}", e.what());
+								}
+							}
+
+							void OnServiceResolved(
+								void*,
+								const unsigned char*,
+								uint16_t,
+								const char* hosttarget,
+								const char*,
+								uint16_t port) noexcept override
+							{
+								try
+								{
+									string hostName = hosttarget ? hosttarget : ""s;
+
+									// try calculate the host name by chance
+									Trim(hostName, "."s);
+									spdlog::debug("resolved raop service {} on port {}", hostName, port);
+								}
+								catch(...)
+								{
+								}
+							}
+					} browseEvents{ m_dnsSD };
+					const auto handle = m_dnsSD->BrowseForService("_raop._tcp", &browseEvents);
+
+					if (handle->Succeeded())
+					{
+						guard.lock();
+
+						if (!browseStop)
+						{
+							// wait for browse events
+							browseCondition.wait_for(guard, 3s);
+						}
+						guard.unlock();
+					}
+				}
+				catch(const exception& e)
+				{
+					spdlog::error("exception during raop service browsing: {}", e.what());
+				}
+
+				guard.lock();
+			}
+		});
+		spdlog::info("Started Raop Browser");
+
 		// keep alive forever (lifetime is being controled by client)
 		m_srvHttp->set_keep_alive_max_count(numeric_limits<size_t>::max());
 
@@ -164,13 +298,21 @@ void RaopServer::Run() noexcept
 			{
 				try
 				{
-#if defined(_DEBUG) && defined(_WIN32)
-					if (request.method != "OPTIONS"s && request.method != "SET_PARAMETER"s)
+#if defined(_DEBUG) && defined(_WIN32) && 0
+					if (request.method != "OPTIONS"s)
 					{
 						string header;
 						for (const auto& hh : request.headers)
 						{
 							header += (hh.first + ":"s + hh.second + "\n"s);
+						}
+						if (request.method == "ANNOUNCE"s ||
+							request.method == "SETUP"s ||
+							request.method == "RECORD"s ||
+							CopyToLower(request.get_header_value("content-type"s)).find("text"s) != string::npos)
+						{
+							header += "\n"s;
+							header += request.body;
 						}
 						spdlog::info("--------\n{}\n{}\n", request.method, header);
 					}
@@ -635,6 +777,11 @@ void RaopServer::Run() noexcept
 							decoder->Flush();
 							decoder.reset();
 						}
+							
+						// force a service browse
+						const lock_guard<mutex> browseGuard{ browseMutex };
+						browseForce = true;
+						browseCondition.notify_one();
 					}
 					else if (request.method == "RECORD"s)
 					{
@@ -731,6 +878,14 @@ void RaopServer::Run() noexcept
 			break;
 		}
 		spdlog::info("Stopped RaopServer");
+
+		{
+			const lock_guard<mutex> guard{ browseMutex };
+			browseStop = true;
+			browseCondition.notify_all();
+		}
+		browseThread.join();
+		spdlog::info("Stopped Raop Browser");
 	}
 	catch(...)
 	{

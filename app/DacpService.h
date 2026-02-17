@@ -32,6 +32,7 @@ public:
 protected:
     // implemenation of IDnsSDEvents
     void OnServiceResolved(
+        void* handle,
         const unsigned char* txtRecord,
         uint16_t txtLen,
         const char* hosttarget,
@@ -46,7 +47,7 @@ private:
 	const std::string		            m_replyDomain;
     mutable std::mutex                  m_mtx;
     std::atomic_bool                    m_resolved{ false };
-    mutable Condition                   m_condResolved;
+    mutable ShairportQT::Condition      m_condResolved;
     std::string                         m_hostTarget;
     std::string                         m_hostName;
     std::string                         m_fullName;

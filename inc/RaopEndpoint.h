@@ -4,6 +4,10 @@
 #include <vector>
 #include <thread>
 #include <atomic>
+#include <mutex>
+#include <memory>
+#include <future>
+#include <list>
 #include "LayerCake.h"
 
 #define RTP_BASE_HEADER_SIZE			0x04
@@ -27,6 +31,7 @@
 namespace sockpp
 {
     class datagram_socket;
+	class sock_address;
 }
 
 #ifdef _WIN32
@@ -167,6 +172,10 @@ public:
 	{
 		*(uint32_t *)(&buffer[16]) = SWAP32(nVal);
 	}
+	inline uint32_t getRtpSync() const noexcept
+	{
+		return SWAP32(*(uint32_t*)(&buffer[16]));
+	}
 	inline void setRtpData(uint32_t nVal) noexcept
 	{
 		*(uint32_t *)(&buffer[4]) = SWAP32(nVal);
@@ -199,7 +208,7 @@ private:
 	size_t bufSize;
 };
 
-void PutPacketToPool(std::unique_ptr<RtpPacket>&& p);
+void PutPacketToPool(std::unique_ptr<RtpPacket>&& p) noexcept;
 
 class RtpEndpoint;
 
@@ -209,17 +218,52 @@ public:
 	virtual void OnRequest(RtpEndpoint* endpoint, std::unique_ptr<RtpPacket>&& packet) = 0;
 };
 
+class RtpRequestHandler
+    : public IRtpRequestHandler
+{
+public:
+    RtpRequestHandler() = default;
+    RtpRequestHandler(std::shared_ptr<std::promise<bool>>&& p)
+        : promiseRequestReceived{ std::move(p) }
+    {
+        assert(promiseRequestReceived);
+    }
+
+protected:
+	void OnRequest(RtpEndpoint*, std::unique_ptr<RtpPacket>&& packet) override
+    {
+        packetList.emplace_back(move(packet));
+
+        if (promiseRequestReceived)
+        {
+            promiseRequestReceived->set_value(true);
+        }
+    }
+
+public:
+    std::list<std::unique_ptr<RtpPacket>> packetList;
+
+private:
+    const std::shared_ptr<std::promise<bool>> promiseRequestReceived;
+};
+
 class RtpEndpoint 
 {
 public:
-	RtpEndpoint(IRtpRequestHandler* requestHandler, const std::string& peer);
+	RtpEndpoint(IRtpRequestHandler* requestHandler = nullptr, const std::string& peer = {}, const uint16_t peerPort = 0);
     ~RtpEndpoint();
 
-	bool SendTo(const void* buf, size_t len, USHORT port) noexcept;
+	bool SendTo(const void* buf, size_t len) noexcept;
+	bool SendTo(const void* buf, size_t len, uint16_t port) noexcept;
 
 	inline uint16_t GetPort() const noexcept
 	{
 		return m_port;
+	}
+
+	inline bool IsV4() const noexcept
+	{
+		return m_isV4;
 	}
 
 private:
@@ -228,6 +272,10 @@ private:
 private:
 	IRtpRequestHandler*	const       			m_requestHandler;
 	const std::string			       			m_peer;
+	const uint16_t								m_peerPort;
+	std::unique_ptr<sockpp::sock_address>		m_peerAddress;
+	std::unique_ptr<sockpp::datagram_socket>	m_peerSendToSocket;
+	std::mutex									m_mtxSendToSocket;
 	bool										m_isV4;
     std::unique_ptr<std::thread>    			m_thread;
     std::unique_ptr<sockpp::datagram_socket> 	m_socket;

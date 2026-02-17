@@ -8,18 +8,26 @@
 #include "sockpp/sock_address.h"
 
 using namespace std;
-using namespace string_literals;
+using namespace literals;
 
 static mutex mtxPacketPool;
 static list<unique_ptr<RtpPacket>> packetPool;
 
-void PutPacketToPool(unique_ptr<RtpPacket>&& p)
+void PutPacketToPool(unique_ptr<RtpPacket>&& p) noexcept
 {
     assert(p);
     p->Init();
 
     const lock_guard<mutex> guard(mtxPacketPool);
-    packetPool.emplace_back(move(p));
+
+    try
+    {
+        packetPool.emplace_back(move(p));
+    }
+    catch (...)
+    {
+        p.reset();
+    }
 }
 
 static unique_ptr<RtpPacket> GetNewPacketFromPool()
@@ -37,47 +45,93 @@ static unique_ptr<RtpPacket> GetNewPacketFromPool()
     return make_unique<RtpPacket>();
 }
 
-static USHORT GetUniquePortNumber()
+static uint16_t GetUniquePortNumber(bool localOnly)
 {
     sockpp::socket_initializer::initialize();
     static atomic_uint16_t src{ 6000 };
-    const auto result = src++;
+    static atomic_uint16_t localSrc{ 55000 };
+    const auto result = localOnly ? localSrc++ : src++;
 
-	if (result == 12000)
+	if (src >= 12000)
     {
 		src = 6000;
+    }
+	if (localSrc >= 63000)
+    {
+		localSrc = 55000;
     }
 	return result;
 }
 
-RtpEndpoint::RtpEndpoint(IRtpRequestHandler* requestHandler, const string& peer)
+RtpEndpoint::RtpEndpoint(IRtpRequestHandler* requestHandler, const string& peer /*= {}*/, const uint16_t peerPort /*= 0*/)
     : m_requestHandler{ requestHandler }
-    , m_peer(peer)
+    , m_peer{ peer.empty() ? "127.0.0.1"s : peer }
+    , m_peerPort{ peerPort }
     , m_isV4{ true }
     , m_port { 0 }
     , m_stop{ false }
 {
-    assert(m_requestHandler);
     assert(!m_peer.empty());
+    const bool localOnly = peer.empty();
 
-    USHORT port = GetUniquePortNumber();
+    // call "GetUniquePortNumber" here - which will invoke "socket_initializer"
+    uint16_t port = GetUniquePortNumber(localOnly);
 
     try
     {
-        const sockpp::inet_address addrPeer(m_peer, 1024);
+        const sockpp::inet_address addrPeer(m_peer, m_peerPort ? m_peerPort : static_cast<uint16_t>(1024));
+
+        try
+        {
+            m_peerAddress = make_unique<sockpp::inet_address>(addrPeer);
+
+            if (m_peerPort)
+            {
+                m_peerSendToSocket = make_unique<sockpp::udp_socket>();
+            }
+        }
+        catch (...)
+        {
+            throw;
+        }
     }
     catch(...)
     {
         m_isV4 = false;
+        m_peerAddress = make_unique<sockpp::inet6_address>(m_peer, m_peerPort ? m_peerPort : static_cast<uint16_t>(1024));
+
+        if (m_peerPort)
+        {
+            m_peerSendToSocket = make_unique<sockpp::udp6_socket>();
+        }
     }
 
-    for (int i = 0; i < 1024; ++i, port = GetUniquePortNumber())
+    if (m_peerSendToSocket)
+    {
+        try
+        {
+            if (!m_peerSendToSocket->connect(*m_peerAddress))
+            {
+                // unexpected because this is not really a "connection" attempt
+                assert(false);
+                m_peerSendToSocket.reset();
+            }
+        }
+        catch (...)
+        {
+            // unexpected because this is not really a "connection" attempt
+            assert(false);
+            m_peerSendToSocket.reset();
+        }
+    }
+
+    for (int i = 0; i < 1024; ++i, port = GetUniquePortNumber(localOnly))
     {
         unique_ptr<sockpp::sock_address> addr;
 
         if (m_isV4)
         {
-            addr = make_unique<sockpp::inet_address>(port);
+            addr = localOnly ? make_unique<sockpp::inet_address>(m_peer, port) : make_unique<sockpp::inet_address>(port);
             m_socket = make_unique<sockpp::udp_socket>();
 
         }
@@ -155,7 +209,14 @@ void RtpEndpoint::Run() noexcept
             }
             packet->resize(size);
 
-            m_requestHandler->OnRequest(this, move(packet));
+            if (m_requestHandler)
+            {
+                m_requestHandler->OnRequest(this, move(packet));
+            }
+            else
+            {
+                PutPacketToPool(move(packet));
+            }
         }
     }
     catch(...)
@@ -163,25 +224,81 @@ void RtpEndpoint::Run() noexcept
     }
 }
 
-bool RtpEndpoint::SendTo(const void* buf, size_t len, USHORT port) noexcept
+bool RtpEndpoint::SendTo(const void* buf, size_t len) noexcept
 {
+    try
+    {
+        const lock_guard<mutex> guard(m_mtxSendToSocket);
+
+        if (m_peerSendToSocket)
+        {
+            if (m_peerSendToSocket->send(buf, len) == len)
+            {
+                return true;
+            }
+        }
+    }
+    catch (...)
+    {
+    }
+    return false;
+}
+
+bool RtpEndpoint::SendTo(const void* buf, size_t len, uint16_t port) noexcept
+{
+    if (port == m_peerPort)
+    {
+        try
+        {
+            const lock_guard<mutex> guard(m_mtxSendToSocket);
+
+            if (m_peerSendToSocket)
+            {
+                if (m_peerSendToSocket->send(buf, len) == len)
+                {
+                    return true;
+                }
+            }
+        }
+        catch (...)
+        {
+        }
+    }
     try
     {
         if (m_isV4)
         {
             sockpp::udp_socket sock;
 
-            if (!sock.connect(sockpp::inet_address(m_peer, port))) 
+            if (port == m_peerPort)
             {
-                return FALSE;
+                assert(m_peerAddress);
+
+                if (!sock.connect(*m_peerAddress))
+                {
+                    return false;
+                }
+            }
+            else if (!sock.connect(sockpp::inet_address(m_peer, port))) 
+            {
+                return false;
             }
             return sock.send(buf, len) == len;
         }
         sockpp::udp6_socket sock;
 
-        if (!sock.connect(sockpp::inet6_address(m_peer, port))) 
+        if (port == m_peerPort)
         {
-            return FALSE;
+            assert(m_peerAddress);
+
+            if (!sock.connect(*m_peerAddress))
+            {
+                return false;
+            }
+        }
+        else if (!sock.connect(sockpp::inet6_address(m_peer, port)))
+        {
+            return false;
         }
         return sock.send(buf, len) == len;
     }

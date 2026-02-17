@@ -16,6 +16,7 @@
 #include <sstream>
 #include <vector>
 #include <utility>
+#include <chrono>
 #include <functional>
 
 uint64_t HexToInteger(const std::string& strID) noexcept;
@@ -53,7 +54,6 @@ std::string EncodeToHex(const T& buffer, bool bForceUppercase = false)
 	return ss.str();
 }
 
-
 class ScopeContext
 {
 public:
@@ -66,3 +66,9 @@ public:
 private:
 	const std::function<void()> m_scopeCleanup;
 };
+
+uint64_t ToNTP(const std::chrono::system_clock::time_point tp) noexcept;
+std::chrono::system_clock::time_point FromNTP(const uint64_t ntp) noexcept;
+std::string ToISO8601String(const std::chrono::system_clock::time_point& tp, const bool utc = false);
+std::string ToString(const std::chrono::system_clock::time_point& tp, const bool utc = false);
+std::wstring ErrorToString(uint32_t err, uint32_t languageID = 0);

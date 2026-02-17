@@ -21,11 +21,20 @@
 #include "audio/PlaySound.h"
 #include <time.h>
 
+#ifdef Q_OS_WIN
+#include <wintoastlib.h>
+#endif
+
 using namespace std;
 using namespace literals;
 
-MainDlg::MainDlg(const SharedPtr<IValueCollection>& config, const std::string& configName)
-    : m_config{ config }
+#ifdef Q_OS_WIN
+using namespace WinToastLib;
+#endif
+
+MainDlg::MainDlg(QApplication* app, const SharedPtr<IValueCollection>& config, const std::string& configName)
+    : m_app{ app }
+    , m_config{ config }
     , m_strConfigName{ configName }
     , m_dnsSD{ MakeShared<DnsSD>() }
     , m_iconShairportQt{ ":/ShairportQt.ico" }
@@ -33,6 +42,56 @@ MainDlg::MainDlg(const SharedPtr<IValueCollection>& config, const std::string& c
     , m_iconPause{ ":/pause.png" }
     , m_handleKeyboardHook{ KeyboardHook::Setup(this) }
 {
+    assert(m_app);
+
+    if (VariantValue::Key("GlobalInstanceHandler").TryGet<bool>(config).value_or(true))
+    {
+        // connect to global instance object
+        const auto instanceName = "ShairportQt_"s + EncodeToHex(VariantValue::Key("HWaddress").Get<vector<uint8_t>>(config), true);
+        m_instance = new QSharedMemory(instanceName.c_str(), this);
+        
+        if (m_instance->attach())
+        {
+            spdlog::debug("successfully attached to instance memory: {}", instanceName);
+            const uint16_t* port = static_cast<const uint16_t*>(m_instance->constData());
+
+            if (port)
+            {
+                RtpEndpoint notifier;
+
+                if (notifier.SendTo("show", 4, *port))
+                {
+                    // we've notified the main instance successfully -> terminate this instance
+                    spdlog::info("successfully signaled 'show' to instance memory: {} on Port: {}", instanceName, *port);
+                    m_instance->detach();
+                    throw runtime_error("main instance notified");
+                }
+                else
+                {
+                    spdlog::error("failed to send 'show'");
+                }
+            }
+            else
+            {
+                spdlog::error("failed to get memory-data");
+            }
+            m_instance->detach();
+        }
+        if (m_instance->create(sizeof(uint16_t)))
+        {
+            uint16_t* port = static_cast<uint16_t*>(m_instance->data());
+            assert(port);
+
+            m_instanceEndpoint = make_unique<RtpEndpoint>(this);
+            *port = m_instanceEndpoint->GetPort();
+            spdlog::debug("successfully created instance memory: {} on Port: {}", instanceName,
+                m_instanceEndpoint->GetPort());
+        }
+        else
+        {
+            spdlog::error("failed to create to instance memory: {}", instanceName);
+        }
+    }
     // pre-create pixmap logo
     {
         QImage surface(tr(":/AdShadow.png"));
@@ -61,6 +120,8 @@ MainDlg::MainDlg(const SharedPtr<IValueCollection>& config, const std::string& c
     connect(this, &MainDlg::ShowAlbumArt, this, &MainDlg::OnAlbumArt);
     connect(this, &MainDlg::ShowAdArt, this, &MainDlg::OnShowAdArt);
     connect(this, &MainDlg::ShowToastMessage, this, &MainDlg::OnShowToastMessage);
+    connect(this, &MainDlg::ActivateWindow, this, &MainDlg::OnActivateWindow);
+    connect(this, &MainDlg::HideWindow, this, &MainDlg::OnHideWindow);
 
     setWindowIcon(QIcon(":/ShairportQt.png"));
     setWindowTitle(tr("Shairport"));
@@ -600,6 +661,25 @@ void MainDlg::ConfigureSystemTray()
         {
             QPointer<QMenu> trayIconMenu = new QMenu(GetString(StringID::MENU_FILE), this);
 #ifdef Q_OS_WIN
+            if (WinToast::isCompatible() && VariantValue::Key("UseWinToast").TryGet<bool>(m_config).value_or(true))
+            {
+                WinToast::instance()->setAppName(L"ShairportQT");
+                WinToast::instance()->setAppUserModelId(WinToast::configureAUMI(L"Shairport"s, L"ShairportQT"s, L"Audio"s, L"1.0"s));
+                
+                if (!WinToast::instance()->initialize())
+                {
+                    spdlog::error("failed to initialize WinToast");
+                }
+                else
+                {
+                    m_bUseWinToast = true;
+                    spdlog::debug("WinToast successfully initialized");
+                }
+            }
+            else
+            {
+                spdlog::info("WinToast is not compatible with your system");
+            }
             connect(trayIconMenu, &QMenu::aboutToHide, [this]()
                 {
                     m_timepointTrayContextMenuClosed = chrono::steady_clock::now();
@@ -909,7 +989,11 @@ void MainDlg::OnSetCurrentImage(const char* data, size_t dataLen, string&& image
         }
         else
         {
+#if Q_MOC_OUTPUT_REVISION <= 67
+            item = make_unique<ImageQueueItem>(QByteArray{ data, static_cast<int>(dataLen) }, std::move(imageType));
+#else
             item = make_unique<ImageQueueItem>(QByteArray{ data, static_cast<qsizetype>(dataLen) }, std::move(imageType));
+#endif
         }
         {
             const lock_guard<mutex> guard(m_mtx);
@@ -982,7 +1066,7 @@ void MainDlg::OnDNSServiceBrowseReply(
                 string	regType{ regtype ? regtype : ""s };
                 string	replyDomain{ replydomain ? replydomain : ""s };
 
-                spdlog::info("Main Dialog: OnDNSServiceBrowseReply registered: {}.{}{}"s, serviceName, regType, replydomain);
+                spdlog::info("Main Dialog: OnDNSServiceBrowseReply registered: {}.{}{}", serviceName, regType, replydomain);
 
                 // try to lookup an existing entry
                 DacpServicePtr dacpService;
@@ -1038,7 +1122,7 @@ void MainDlg::OnDNSServiceBrowseReply(
             }
             else
             {
-                spdlog::info("Main Dialog: OnDNSServiceBrowseReply unregistered: {}"s, serviceName);
+                spdlog::info("Main Dialog: OnDNSServiceBrowseReply unregistered: {}", serviceName);
 
                 auto asyncRemove = async(launch::async, [this](const uint64_t dacpID) -> void
                     {
@@ -1270,7 +1354,122 @@ void MainDlg::OnShowToastMessage()
             {
                 ico = m_iconShairportQt;
             }
+#ifdef Q_OS_WIN
+            if (m_bUseWinToast)
+            {
+                class WinToastHandler
+                    : public IWinToastHandler
+                {
+                private:
+                    string m_pathImageFile;
+                    bool& m_bUseWinToast;
+                    
+                public:
+                    WinToastHandler(const unique_ptr<QPixmap>& albumArt, 
+                        atomic_uint64_t& fileImagePostFix, bool& bUseWinToast)
+                        : m_bUseWinToast{ bUseWinToast }
+                    {
+                        if (albumArt)
+                        {
+                            char buf[MAX_PATH + 1]{};
+                            const auto count = GetTempPathA(MAX_PATH + 1, buf);
+
+                            if (count > 0)
+                            {
+                                try
+                                {
+                                    m_pathImageFile = buf;
+                                    m_pathImageFile += ("ShairportQT_TempImage_"s +
+                                            to_string(++fileImagePostFix) +
+                                            ".png"s);
+                                    DeleteFileA(m_pathImageFile.c_str());
+
+                                    if (!albumArt->save(QString::fromStdString(m_pathImageFile), "PNG", 100))
+                                    {
+                                        throw runtime_error("can not save image to file");
+                                    }
+                                }
+                                catch(...)
+                                {
+                                    m_pathImageFile.clear();
+                                }
+                            }
+                        }
+                    }
+                    
+                    ~WinToastHandler()
+                    {
+                        if (!m_pathImageFile.empty())
+                        {
+                            if (!DeleteFileA(m_pathImageFile.c_str()))
+                            {
+                                m_bUseWinToast = false;
+                                spdlog::error("failed to delete temporary image file: {} because {}",
+                                    m_pathImageFile, GetLastError());
+                            }
+                        }
+                    }
+
+                    bool HasImage() const noexcept
+                    {
+                        return !m_pathImageFile.empty();
+                    }
+
+                    const string& GetImagePath() const noexcept
+                    {
+                        return m_pathImageFile;
+                    }
+
+                protected:
+                    // WinToast Events implementation (unused)
+                    void toastActivated() const override
+                    {
+                    }
+
+                    void toastActivated(int) const override
+                    {
+                    }
+                    
+                    void toastActivated(std::wstring) const override
+                    {
+                    }
+                    
+                    void toastDismissed(WinToastDismissalReason) const override
+                    {
+                    }
+                    
+                    void toastFailed() const override
+                    {
+                    }
+                };
+
+                auto handler = make_unique<WinToastHandler>(m_currentAlbumArt, m_fileImagePostFix, m_bUseWinToast);
+
+                WinToastTemplate toastMessage = WinToastTemplate(handler->HasImage() ? 
+                    WinToastTemplate::ImageAndText02 : WinToastTemplate::Text02);
+                
+                if (handler->HasImage())
+                {
+                    toastMessage.setImagePath(CA2WEX(handler->GetImagePath()));
+                }
+                toastMessage.setTextField(m_strCurrentArtistInTray.toStdWString(), WinToastTemplate::FirstLine);
+                toastMessage.setTextField(m_strCurrentTrackInTray.toStdWString(), WinToastTemplate::SecondLine);
+                toastMessage.setAudioOption(WinToastTemplate::AudioOption::Silent);
+
+                // if you don't see any toast messages ... notifications are probably disabled on your system!
+                if (WinToast::instance()->showToast(toastMessage, handler.release()) < 0)
+                {
+                    spdlog::error("WinToast::showToast failed");
+                    m_systemTray->showMessage(m_strCurrentArtistInTray, m_strCurrentTrackInTray, ico);
+                }
+            }
+            else
+            {
+                m_systemTray->showMessage(m_strCurrentArtistInTray, m_strCurrentTrackInTray, ico);
+            }
+#else
             m_systemTray->showMessage(m_strCurrentArtistInTray, m_strCurrentTrackInTray, ico);
+#endif            
         }
     }
 }
@@ -1461,7 +1660,10 @@ void MainDlg::OnQuit()
     {
         m_systemTray->hide();
     }
+    m_app->setQuitOnLastWindowClosed(true);
+    SIGNAL(m_app->aboutToQuit());
     close();
+    m_app->quit();
 }
 
 // Widget override: the dialog is closing -> end/shtutdown
@@ -1538,6 +1740,27 @@ void MainDlg::closeEvent(QCloseEvent* event)
 
         try
         {
+            m_instanceEndpoint.reset();
+
+            if (m_instance && m_instance->isAttached())
+            {
+                if (!m_instance->detach())
+                {
+                    throw runtime_error("detach returned 'false'");
+                }
+                else
+                {
+                    spdlog::debug("successfully detached from instance memory");
+                }
+            }
+        }
+        catch (const exception& e)
+        {
+            spdlog::error("failed to detach from instance memory: {}", e.what());
+        }
+
+        try
+        {
             const QByteArray geometry = saveGeometry();
 
             if (!geometry.isEmpty())
@@ -1560,12 +1783,32 @@ void MainDlg::showEvent(QShowEvent* event)
     m_isHidden = false;
     spdlog::debug("showEvent");
 
-    if (m_firstShowEvent && VariantValue::Key("StartMinimized").TryGet<bool>(m_config).value_or(false))
+    const bool firstShowEvent = m_firstShowEvent;
+
+    if (firstShowEvent)
     {
-        spdlog::info("start minimized");
-        setWindowState(Qt::WindowMinimized);
+        m_firstShowEvent = false;
+    
+        if (VariantValue::Key("StartMinimized").TryGet<bool>(m_config).value_or(false))
+        {
+            spdlog::info("start minimized");
+            setWindowState(Qt::WindowMinimized);
+
+            // only hide Window, if we do have a tray icon
+            // otherwise we won't be able to restore the Window again
+            if (QSystemTrayIcon::isSystemTrayAvailable() &&
+                VariantValue::Key("TrayIcon").TryGet<bool>(m_config).value_or(true))
+            {
+                auto asyncHideWindow = async(launch::async, [this]() -> void
+                {
+                    this_thread::sleep_for(100ms);
+                    HideWindow();
+                });
+                const lock_guard<mutex> guard(m_mtx);
+                m_listAsyncOperations.emplace_back(std::move(asyncHideWindow));
+            }
+        }
     }
-    m_firstShowEvent = false;
     emit UpdateWidgets();
     QWidget::showEvent(event);
 }
@@ -1576,6 +1819,46 @@ void MainDlg::hideEvent(QHideEvent* event)
     m_isHidden = true;
     spdlog::debug("hideEvent");
     QWidget::hideEvent(event);
+}
+
+// Widget slot: HideWindow
+void MainDlg::OnHideWindow()
+{
+    // show the main dialog
+    hide();
+}
+
+// Widget slot: ActivateWindow
+void MainDlg::OnActivateWindow()
+{
+    // show the main dialog
+    setWindowState(Qt::WindowNoState);
+    show();
+    activateWindow();
+}
+
+void MainDlg::OnRequest(RtpEndpoint*, std::unique_ptr<RtpPacket>&& packet)
+{
+    try
+    {
+        if (packet && packet->size())
+        {
+            const auto command = string((const char*)packet->data(), packet->size());
+
+            spdlog::info("instance command request: {}", command);
+
+            if (command == "show"s)
+            {
+                if (m_isHidden)
+                {
+                    ActivateWindow();
+                }
+            }
+        }
+    }
+    catch(...)
+    { 
+    }
 }
 
 // Keyboard-Hook implementation
@@ -1641,8 +1924,8 @@ void MainDlg::OnAbout()
     QPixmap pixmap(":/ShairportQt.ico");
     labelPixmap->setPixmap(pixmap.scaled(64, 64));
 
-    // search for regular expression "1[., ]+0[., ]+0[., ]+3"
-    QPointer<QLabel> versionLabel = new QLabel(tr("<p><a href=\"https://github.com/Frank-Friemel/ShairportQt\">ShairportQt</a> 1.0.0.3</p>"));
+    // search for regular expression "1[., ]+0[., ]+0[., ]+\d"
+    QPointer<QLabel> versionLabel = new QLabel(tr("<p><a href=\"https://github.com/Frank-Friemel/ShairportQt\">ShairportQt</a> 1.0.0.4</p>"));
 
     dlg->connect(versionLabel, &QLabel::linkActivated, [](QString link)
         {

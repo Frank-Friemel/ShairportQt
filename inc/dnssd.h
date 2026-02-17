@@ -11,6 +11,27 @@
 class IDnsSDEvents
 {
 public:
+    class Service
+    {
+        public:
+            Service( uint32_t interfaceIndex,
+                        const char* serviceName,
+                        const char* regtype,
+                        const char* replyDomain)
+                : m_interfaceIndex{ interfaceIndex }
+                , m_serviceName{ serviceName ? serviceName : "" }
+                , m_regtype{ regtype ? regtype : "" }
+                , m_replyDomain{ replyDomain ? replyDomain : "" }
+            {
+            }
+
+        public:
+            const uint32_t m_interfaceIndex;
+            const std::string m_serviceName;
+            const std::string m_regtype;
+            const std::string m_replyDomain;
+    };
+
     virtual void OnDNSServiceBrowseReply(
         bool registered,
         uint32_t interfaceIndex,
@@ -23,6 +44,7 @@ public:
     }
 
     virtual void OnServiceResolved(
+        void* handle,
         const unsigned char* txtRecord,
         uint16_t txtLen,
         const char* hosttarget,
@@ -48,24 +70,19 @@ public:
     DnsSDHandle(SharedPtr<DnsSD> dnsSD, void* handle = nullptr, int32_t error = 0);
     ~DnsSDHandle();
 
-    bool Succeeded() const noexcept
-    {
-        return m_error == 0;
-    }
+    bool Succeeded() const noexcept;
+    int ErrorCode() const noexcept;
 
-    int ErrorCode() const noexcept
+    void* Handle() const noexcept
     {
-        return m_error;
+        return m_handle;
     }
-
-protected:
-    void Init(void* handle, int32_t error);
 
 protected:
     const SharedPtr<DnsSD>      m_dnsSD;
     std::atomic_bool            m_stop{ false };
-    void*                       m_handle;
-    int32_t                     m_error;
+    void* const                 m_handle;
+    const int32_t               m_error;
     std::future<void>           m_processResult;
 };
 
@@ -78,9 +95,11 @@ class DnsSD
 private:
     class Descriptor;
 
+protected:
+    virtual ~DnsSD();
+
 public:
     DnsSD();
-    ~DnsSD();
     
     DnsHandlePtr CreateRaopServiceFromConfig(const SharedPtr<IValueCollection>& config, bool metaInfo);
     DnsHandlePtr BrowseForService(const char* strRegType, IDnsSDEvents* cb);

@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.15.0)
-project(ShairportQt VERSION 1.0.0.3 LANGUAGES CXX)
+project(ShairportQt VERSION 1.0.0.4 LANGUAGES CXX)
 
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # locate packages
@@ -15,6 +15,7 @@ if (UNIX)
 else()
     find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets})
     find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
+    find_package(unofficial-wintoast CONFIG REQUIRED)
 endif()
 
 find_package(OpenSSL REQUIRED)
@@ -94,6 +95,7 @@ if (UNIX)
     target_link_libraries(ShairportQt PRIVATE Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::DBus)
 else()
     target_link_libraries(ShairportQt PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+    target_link_libraries(ShairportQt PRIVATE unofficial::wintoast::wintoast)
 endif()
 
 if (NOT(CMAKE_BUILD_TYPE MATCHES ".*MinSize.*") AND NOT(CMAKE_BUILD_TYPE MATCHES ".*RelWith.*"))
@@ -124,7 +126,9 @@ if (NOT(CMAKE_BUILD_TYPE MATCHES ".*MinSize.*") AND NOT(CMAKE_BUILD_TYPE MATCHES
     target_link_libraries(ShairportQtTest PRIVATE ShairLib)
     target_link_libraries(ShairportQtTest PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     target_link_libraries(ShairportQtTest PRIVATE Sockpp::sockpp-static)
-
+if (UNIX)
+    target_link_libraries(ShairportQtTest PRIVATE asound)
+endif()
     add_test(AllTests ShairportQtTest)
 endif()
 

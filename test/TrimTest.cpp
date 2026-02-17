@@ -3,6 +3,7 @@
 #include <list>
 #include "libutils.h"
 #include <vector>
+#include <LayerCake.h>
 
 using namespace std;
 using namespace literals;
@@ -19,6 +20,22 @@ TEST(Trim, Basic)
         Trim(t, L" \t\r\n"s);
         EXPECT_EQ(t, L"Test"s);
     }
+}
+
+TEST(Trim, Unicode)
+{
+    const auto unicodeString = L"\x05d3\x05d5\x05e0\x05d3\x05d0\x05e8\x05df\x05de\x05e2"s;
+
+    const auto utfStringA = CW2AEX(unicodeString);
+    const auto utfStringW = CA2WEX(utfStringA);
+
+    EXPECT_EQ(utfStringW, unicodeString);
+}
+
+TEST(Trim, ErrorMessage)
+{
+    const auto msg = ErrorToString(ERROR_ACCESS_DENIED);
+    EXPECT_FALSE(msg.empty());
 }
 
 TEST(Trim, ToHex)
@@ -135,4 +152,50 @@ TEST(Trim, ParseRegEx)
         });
 
     EXPECT_EQ(result, 4161);
+}
+
+TEST(Trim, NTP)
+{
+    {
+        const uint64_t ntp = ToNTP(chrono::system_clock::time_point());
+        const auto str = ToISO8601String(FromNTP(ntp), true);
+
+        EXPECT_EQ(str, "1970-01-01T00:00:00+0000"s);
+    }
+    {
+        const auto str = ToISO8601String(FromNTP(0xffffffff83AA7E80), true);
+
+        EXPECT_EQ(str, "1970-01-01T00:00:00.999999+0000"s);
+    }
+    {
+        const auto str = ToISO8601String(FromNTP(0xffffffffffffffff), true);
+
+        EXPECT_EQ(str, "2036-02-07T06:28:15.999999+0000"s);
+    }
+    {
+        const auto t = time(NULL);
+        const auto now = chrono::system_clock::from_time_t(t);
+
+        const uint64_t ntp = ToNTP(now + 500ms);
+        const auto strNTP = ToISO8601String(FromNTP(ntp));
+
+        printf("time from ntp       : %s\n", strNTP.c_str());
+
+        const auto strTP = ToISO8601String(now + 500ms);
+        printf("time from time_point: %s\n", strTP.c_str());
+        EXPECT_EQ(strNTP, strTP);
+    }
+    {
+        const auto t = time(NULL);
+        const auto now = chrono::system_clock::from_time_t(t);
+
+        const uint64_t ntp = ToNTP(now + 999999us);
+        const auto strNTP = ToISO8601String(FromNTP(ntp));
+
+        printf("time from ntp       : %s\n", strNTP.c_str());
+
+        const auto strTP = ToISO8601String(now + 999999us);
+        printf("time from time_point: %s\n", strTP.c_str());
+        EXPECT_EQ(strNTP, strTP);
+    }
 }
