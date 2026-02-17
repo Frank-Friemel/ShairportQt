@@ -661,7 +661,7 @@ void MainDlg::ConfigureSystemTray()
         {
             QPointer<QMenu> trayIconMenu = new QMenu(GetString(StringID::MENU_FILE), this);
 #ifdef Q_OS_WIN
-            if (WinToast::isCompatible())
+            if (WinToast::isCompatible() && VariantValue::Key("UseWinToast").TryGet<bool>(m_config).value_or(true))
             {
                 WinToast::instance()->setAppName(L"ShairportQT");
                 WinToast::instance()->setAppUserModelId(WinToast::configureAUMI(L"Shairport"s, L"ShairportQT"s, L"Audio"s, L"1.0"s));
