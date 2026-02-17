@@ -87,7 +87,7 @@ private:
     std::unique_ptr<std::thread>            m_queueThread;
 
     std::mutex                              m_mtxQueue;
-    Condition                               m_condQueue;
+    ShairportQT::Condition                  m_condQueue;
     std::atomic_bool                        m_stopThread;
     std::atomic_uint                        m_flush;
         
@@ -99,7 +99,7 @@ private:
     std::list<ResendRequestPtr>             m_queueResend;
     std::list<ResendRequestPtr>             m_ringResend;
     std::mutex                              m_mtxResend;
-    Condition                               m_condResend;
+    ShairportQT::Condition                  m_condResend;
     std::unique_ptr<std::thread>            m_threadsResend[2];
 
     const size_t                            m_lowLevelQueue;

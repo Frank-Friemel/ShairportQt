@@ -37,9 +37,6 @@ The installation for Linux depends a bit on your Linux distribution.
 I myself am using [`Manjaro-Linux`](https://manjaro.org/)
 which worked out of the box and I would expect the same for all KDE based distributions. You'll need at least `Qt 6.7` installed on your machine.
 
-May be anybody of the Linux Pros can give advice how to improve the installation experience with a `.deb` or `.rpm`
-package. Comments are appreciated.
-
 The [releases](https://github.com/Frank-Friemel/ShairportQt/releases) package contains an installation script. So, for now you need to unpack the
 [zip](https://github.com/Frank-Friemel/ShairportQt/releases) file, open a terminal, change-directory to
 `Linux_x64` and start script `install.sh` as superuser:
@@ -80,6 +77,7 @@ When you have issues with `ShairportQt` please provide following informations:
 - `spdlog`
 - `sockpp`
 - `qtbase`
+- `WinToast`
 - `gtest`
 
 I recommend to use `vcpkg` in order to get them.

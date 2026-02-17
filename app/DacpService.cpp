@@ -102,7 +102,7 @@ void DacpService::OnServiceResolved(
                 m_hostName = move(hostName);
             }
             m_resolved = true;
-            m_condResolved.NotifyAndUnlock(sync, Condition::mode::all);
+            m_condResolved.NotifyAndUnlock(sync, ShairportQT::Condition::mode::all);
         }
     }
     catch (const exception& e)

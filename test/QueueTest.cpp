@@ -10,7 +10,7 @@ using namespace literals;
 
 TEST(Queuetest, ConditionTiming)
 {
-	Condition condition;
+	ShairportQT::Condition condition;
 
 	mutex mtx;
 	unique_lock<mutex> guard(mtx);

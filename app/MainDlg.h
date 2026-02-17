@@ -48,7 +48,7 @@ class MainDlg
     Q_OBJECT
 
 public:
-    MainDlg(const QApplication* app, const SharedPtr<IValueCollection>& config, const std::string& configName);
+    MainDlg(QApplication* app, const SharedPtr<IValueCollection>& config, const std::string& configName);
     ~MainDlg();
 
 private:
@@ -139,7 +139,7 @@ private:
     using ImageQueueItemPtr = std::unique_ptr<ImageQueueItem>;
     using TimePoint = std::chrono::steady_clock::time_point;
 
-    const QApplication*                 m_app;
+    QApplication* const                 m_app;
     const SharedPtr<IValueCollection>  	m_config;
     const std::string                   m_strConfigName;
     const SharedPtr<DnsSD>              m_dnsSD;
@@ -147,10 +147,14 @@ private:
     std::mutex                          m_mtx;
     DacpID                              m_currentDacpID;
     std::map<uint64_t, DacpServicePtr>  m_mapDacpService;
-    Condition                           m_condDatachange;
+    ShairportQT::Condition              m_condDatachange;
     std::list<ImageQueueItemPtr>        m_imageQueue;
     std::atomic_uint64_t                m_timePointShowAlbumArt{ 0 };
     std::unique_ptr<TimePoint>          m_timePointShowToastMessage;
+#ifdef Q_OS_WIN    
+    bool                                m_bUseWinToast{ false };
+    std::atomic_uint64_t                m_fileImagePostFix{ 0 };
+#endif
     std::atomic_bool                    m_dialogClosed{ false };
     std::atomic_bool                    m_firstShowEvent{ true };
     std::atomic_bool                    m_isHidden{ false };

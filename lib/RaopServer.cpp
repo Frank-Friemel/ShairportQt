@@ -298,7 +298,7 @@ void RaopServer::Run() noexcept
 			{
 				try
 				{
-#if defined(_DEBUG) && defined(_WIN32)
+#if defined(_DEBUG) && defined(_WIN32) && 0
 					if (request.method != "OPTIONS"s)
 					{
 						string header;

@@ -21,10 +21,18 @@
 #include "audio/PlaySound.h"
 #include <time.h>
 
+#ifdef Q_OS_WIN
+#include <wintoastlib.h>
+#endif
+
 using namespace std;
 using namespace literals;
 
-MainDlg::MainDlg(const QApplication* app, const SharedPtr<IValueCollection>& config, const std::string& configName)
+#ifdef Q_OS_WIN
+using namespace WinToastLib;
+#endif
+
+MainDlg::MainDlg(QApplication* app, const SharedPtr<IValueCollection>& config, const std::string& configName)
     : m_app{ app }
     , m_config{ config }
     , m_strConfigName{ configName }
@@ -653,6 +661,25 @@ void MainDlg::ConfigureSystemTray()
         {
             QPointer<QMenu> trayIconMenu = new QMenu(GetString(StringID::MENU_FILE), this);
 #ifdef Q_OS_WIN
+            if (WinToast::isCompatible())
+            {
+                WinToast::instance()->setAppName(L"ShairportQT");
+                WinToast::instance()->setAppUserModelId(WinToast::configureAUMI(L"Shairport"s, L"ShairportQT"s, L"Audio"s, L"1.0"s));
+                
+                if (!WinToast::instance()->initialize())
+                {
+                    spdlog::error("failed to initialize WinToast");
+                }
+                else
+                {
+                    m_bUseWinToast = true;
+                    spdlog::debug("WinToast successfully initialized");
+                }
+            }
+            else
+            {
+                spdlog::info("WinToast is not compatible with your system");
+            }
             connect(trayIconMenu, &QMenu::aboutToHide, [this]()
                 {
                     m_timepointTrayContextMenuClosed = chrono::steady_clock::now();
@@ -962,7 +989,11 @@ void MainDlg::OnSetCurrentImage(const char* data, size_t dataLen, string&& image
         }
         else
         {
+#if Q_MOC_OUTPUT_REVISION <= 67
+            item = make_unique<ImageQueueItem>(QByteArray{ data, static_cast<int>(dataLen) }, std::move(imageType));
+#else
             item = make_unique<ImageQueueItem>(QByteArray{ data, static_cast<qsizetype>(dataLen) }, std::move(imageType));
+#endif
         }
         {
             const lock_guard<mutex> guard(m_mtx);
@@ -1323,7 +1354,122 @@ void MainDlg::OnShowToastMessage()
             {
                 ico = m_iconShairportQt;
             }
+#ifdef Q_OS_WIN
+            if (m_bUseWinToast)
+            {
+                class WinToastHandler
+                    : public IWinToastHandler
+                {
+                private:
+                    string m_pathImageFile;
+                    bool& m_bUseWinToast;
+                    
+                public:
+                    WinToastHandler(const unique_ptr<QPixmap>& albumArt, 
+                        atomic_uint64_t& fileImagePostFix, bool& bUseWinToast)
+                        : m_bUseWinToast{ bUseWinToast }
+                    {
+                        if (albumArt)
+                        {
+                            char buf[MAX_PATH + 1]{};
+                            const auto count = GetTempPathA(MAX_PATH + 1, buf);
+
+                            if (count > 0)
+                            {
+                                try
+                                {
+                                    m_pathImageFile = buf;
+                                    m_pathImageFile += ("ShairportQT_TempImage_"s +
+                                            to_string(++fileImagePostFix) +
+                                            ".png"s);
+                                    DeleteFileA(m_pathImageFile.c_str());
+
+                                    if (!albumArt->save(QString::fromStdString(m_pathImageFile), "PNG", 100))
+                                    {
+                                        throw runtime_error("can not save image to file");
+                                    }
+                                }
+                                catch(...)
+                                {
+                                    m_pathImageFile.clear();
+                                }
+                            }
+                        }
+                    }
+                    
+                    ~WinToastHandler()
+                    {
+                        if (!m_pathImageFile.empty())
+                        {
+                            if (!DeleteFileA(m_pathImageFile.c_str()))
+                            {
+                                m_bUseWinToast = false;
+                                spdlog::error("failed to delete temporary image file: {} because {}",
+                                    m_pathImageFile, GetLastError());
+                            }
+                        }
+                    }
+
+                    bool HasImage() const noexcept
+                    {
+                        return !m_pathImageFile.empty();
+                    }
+
+                    const string& GetImagePath() const noexcept
+                    {
+                        return m_pathImageFile;
+                    }
+
+                protected:
+                    // WinToast Events implementation (unused)
+                    void toastActivated() const override
+                    {
+                    }
+
+                    void toastActivated(int) const override
+                    {
+                    }
+                    
+                    void toastActivated(std::wstring) const override
+                    {
+                    }
+                    
+                    void toastDismissed(WinToastDismissalReason) const override
+                    {
+                    }
+                    
+                    void toastFailed() const override
+                    {
+                    }
+                };
+
+                auto handler = make_unique<WinToastHandler>(m_currentAlbumArt, m_fileImagePostFix, m_bUseWinToast);
+
+                WinToastTemplate toastMessage = WinToastTemplate(handler->HasImage() ? 
+                    WinToastTemplate::ImageAndText02 : WinToastTemplate::Text02);
+                
+                if (handler->HasImage())
+                {
+                    toastMessage.setImagePath(CA2WEX(handler->GetImagePath()));
+                }
+                toastMessage.setTextField(m_strCurrentArtistInTray.toStdWString(), WinToastTemplate::FirstLine);
+                toastMessage.setTextField(m_strCurrentTrackInTray.toStdWString(), WinToastTemplate::SecondLine);
+                toastMessage.setAudioOption(WinToastTemplate::AudioOption::Silent);
+
+                // if you don't see any toast messages ... notifications are probably disabled on your system!
+                if (WinToast::instance()->showToast(toastMessage, handler.release()) < 0)
+                {
+                    spdlog::error("WinToast::showToast failed");
+                    m_systemTray->showMessage(m_strCurrentArtistInTray, m_strCurrentTrackInTray, ico);
+                }
+            }
+            else
+            {
+                m_systemTray->showMessage(m_strCurrentArtistInTray, m_strCurrentTrackInTray, ico);
+            }
+#else
             m_systemTray->showMessage(m_strCurrentArtistInTray, m_strCurrentTrackInTray, ico);
+#endif            
         }
     }
 }
