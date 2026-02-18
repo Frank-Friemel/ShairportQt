@@ -19,10 +19,6 @@ ShairportQt consists of a single executable file. So, there's not much to instal
 some hints for the several Operating Systems which worked for me. Updating your existing installation please
 do the same. 
 
-Once you've downloaded the
-[zip](https://github.com/Frank-Friemel/ShairportQt/releases) ... just extract the folder which matches your
-OS and follow these instructions:
-
 #### Windows (x64)
 
 The [`Releases`](https://github.com/Frank-Friemel/ShairportQt/releases) section contains a setup executable.
