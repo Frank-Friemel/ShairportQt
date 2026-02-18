@@ -34,6 +34,6 @@ install -vD debian/ShairportQt.desktop ${PACKAGE}/usr/share/applications/org.sha
 install -vDm644 res/ShairportQt.png ${PACKAGE}/usr/share/icons/hicolor/256x256/apps/org.shairport.ShairportQt.png
 
 SIZE=$(du -sk ${PACKAGE} | cut -f1)
-sed -i "s/^Installed-Size:.*\Installed-Size: ${SIZE}" ${PACKAGE}/DEBIAN/control
+sed -i "s/^Installed-Size:.*/Installed-Size: ${SIZE}/" ${PACKAGE}/DEBIAN/control
 
 dpkg-deb --build --root-owner-group ${PACKAGE}
