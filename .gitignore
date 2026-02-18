@@ -400,3 +400,5 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+windows/ShairportQt.exe
+windows/Output/ShairportQt_Setup_*.exe
