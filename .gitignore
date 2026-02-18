@@ -402,3 +402,4 @@ FodyWeavers.xsd
 *.sln.iml
 windows/ShairportQt.exe
 windows/Output/ShairportQt_Setup_*.exe
+linux/install_orig.sh
