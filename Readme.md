@@ -25,7 +25,10 @@ OS and follow these instructions:
 
 #### Windows (x64)
 
-Just copy the file `ShairportQt.exe` to your filesystem and create a Desktop-Link. That's it.
+The [`Releases`](https://github.com/Frank-Friemel/ShairportQt/releases) section contains a setup executable.
+It will forward you to Apple's Bonjour download, if needed.
+
+Alternatively you may install manually by just downloading the `zip` file and copying the file `ShairportQt.exe` to your filesystem and create a Desktop-Link. That's it.
 
 Shairport depends on Apple's [`Bonjour`](https://support.apple.com/kb/DL999). Just start `ShairportQt`... it will guide you in case `Bonjour`
 is not installed on your machine. Please retry to start `ShairportQt.exe` after
