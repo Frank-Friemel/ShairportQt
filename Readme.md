@@ -6,18 +6,18 @@ Play audio content from your iPhone, iPad, iPod or iTunes on your PC with Shairp
 AirPlay lets you wirelessly stream what's on your iOS device whenever you see the AirPlay symbol.
 
 This desktop-software was originally only available for Windows.
-But now it's based on `Qt` and is therefore completely portable/cross platform. Additionally many bugs had been fixed - compared to the
+But now it's based on `Qt` and is therefore completely portable/cross platform. Additionally many bugs have been fixed - compared to the
 previous version (Shairport4w).
 
-Please download pre compiled binaries from [`Releases`](https://github.com/Frank-Friemel/ShairportQt/releases).
-When being asked by your Firewall you should grant access to your LAN if secure. Protect ShairportQt with a password
+Please download precompiled binaries from [`Releases`](https://github.com/Frank-Friemel/ShairportQt/releases).
+If asked by your Firewall, you should grant access to your LAN if you are on a secure network. Protect ShairportQt with a password
 to be sure nobody is misusing this service.
 
 ## Installation
 
 ShairportQt consists of a single executable file. So, there's not much to install. Nevertheless I would like to provide
-some hints for the several Operating Systems which worked for me. Updating your existing installation please
-do the same. 
+some hints for the various operating systems which worked for me. When updating your existing installation, please
+do the same, but make sure to close the running instance of ShairportQt first.
 
 #### Windows (x64)
 
@@ -34,7 +34,7 @@ installation of `Bonjour`.
 
 The installation for Linux depends a bit on your Linux distribution.
 I myself am using [`Manjaro-Linux`](https://manjaro.org/)
-which worked out of the box and I would expect the same for all KDE based distributions. You'll need at least `Qt 6.7` installed on your machine.
+which worked out of the box and I would expect the same for all KDE-based distributions. You'll need at least `Qt 6.7` installed on your machine.
 
 The [releases](https://github.com/Frank-Friemel/ShairportQt/releases) package contains an installation script. So, for now you need to unpack the
 [zip](https://github.com/Frank-Friemel/ShairportQt/releases) file, open a terminal, change-directory to
@@ -62,10 +62,11 @@ Afterwards `ShairportQt` application should be available from your start menu.
 
 ## Problem reports
 
-When you have issues with `ShairportQt` please provide following informations:
+When you have issues with `ShairportQt` please provide the following information:
 
 - Operating System you're using.
-- detailed steps how to reproduce.
+- The device/software which connects to `ShairportQt`
+- Detailed steps on how to reproduce.
 - a log file. Which may be enabled from the advanced options dialog. The log file `ShairportQt.log` will be created within your home folder. Alternatively start `ShairportQt` with command line option `-log`.
 
 ## Building
@@ -130,11 +131,30 @@ do is to provide a name for your instance configuration by applying the command 
 `-config=MyConfigurationName`. The allowed characters for the configuration-name
 are limited to characters `A-Z`, `a-z` and `0-9`.
 
+ShairportQt supports multiple languages. Your preferred language is being detected automatically, usually.
+In case you would like to set it manually ... please edit the file ".ShairportQt_Config.json" which is located
+in your home folder. The format is `json`. So, please be sure **not** to break the config when you're making
+changes (e.g. please add a comma, if it's not the last entry). You may set the key `Language` to one of these values:
+
+- `en-EN` for English
+- `de-DE` for German
+- `es-ES` for Spanish
+- `ca-ES` for Catalan
+- `ja-JP` for Japanese
+
+Example forcing the language to be Japanese:
+
+```shell
+"Language": "ja-JP",
+```
+
+> **Important:** Manually editing the config works only when `ShairportQt` **is not running**
+
 ### Avahi (aka Bonjour)
 
 For Windows you may need to download and install [`Bonjour`](https://support.apple.com/kb/DL999). 
-When being asked during the installation ... just dismiss the option to automatically update Bonjour's files in the background. 
-Which may save you from having another unnecessary process running on your machine.
+When being asked during the installation ... just dismiss the option to automatically update Bonjour's files in the background.
+This may save you from having another unnecessary process running on your machine.
 A desktop-link for Bonjour is also completely unnecessary.
 
 On my Raspbian ... I had to install `libavahi-compat-libdnssd-dev`.
@@ -155,5 +175,5 @@ sudo systemctl start avahi-daemon
 ```
 
 On some Linux distributions you may have to install `avahi` via their own desktop installation tool. Please see my
-Video [Installation of ShaiportQt on Suse](https://youtu.be/UIfek93D5Hw).
+Video [Installation of ShairportQt on Suse](https://youtu.be/UIfek93D5Hw).
 
