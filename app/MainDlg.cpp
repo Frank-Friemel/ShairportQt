@@ -772,7 +772,7 @@ void MainDlg::ConfigureDacpBrowser()
 
         if (!dacpBrowser->Succeeded())
         {
-            spdlog::error("Main Dialog: failed to start DACP Browser with code: ", m_dacpBrowser->ErrorCode());
+            spdlog::error("Main Dialog: failed to start DACP Browser with code: ", dacpBrowser->ErrorCode());
 
             if (!m_isHidden)
             {
@@ -932,28 +932,28 @@ void MainDlg::SendDacpCommand(const string& cmd)
 // Callback sent by RAOP service: "service created"
 void MainDlg::OnCreateRaopService(bool success) noexcept
 {
-    if (!success)
+    try
     {
-        // inform the user that we've failed to create the service
-        spdlog::debug("Main Dialog: emitting RAOP Service check ShowMessage");
-
-        if (!m_dialogClosed)
+        if (!success)
         {
-            try
+            // inform the user that we've failed to create the service
+            spdlog::debug("Main Dialog: emitting RAOP Service check ShowMessage");
+
+            if (!m_dialogClosed)
             {
                 emit ShowMessage(StringID::TROUBLE_SHOOT_RAOP_SERVICE);
             }
-            catch (const exception& e)
-            {
-                spdlog::error("failed to emit TROUBLE_SHOOT_RAOP_SERVICE: ", e.what());
-            }
         }
+        else
+        {
+            ShowStatus(GetString(StringID::STATUS_READY));
+        }
+        spdlog::debug("Main Dialog: RAOP Service created: {}", success);
     }
-    else
+    catch (const exception& e)
     {
-        ShowStatus(GetString(StringID::STATUS_READY));
+        spdlog::error("failed show status: ", e.what());
     }
-    spdlog::debug("Main Dialog: RAOP Service created: {}", success);
 }
 
 // Callback sent by RAOP service: DMAP info arrived
@@ -1644,7 +1644,27 @@ void MainDlg::OnProgressInfo(int currentSeconds, int totalSeconds, QString conne
 
     if (connectedClient.isEmpty())
     {
-        m_labelStatus->setText(GetString(StringID::STATUS_READY));
+        shared_ptr<RaopServer> raopServer;
+        {
+            const lock_guard<mutex> guard(m_mtx);
+            raopServer = m_raopServer;
+        }
+        if (raopServer && raopServer->GetErrorCode() == ERROR_SUCCESS)
+        {
+            m_labelStatus->setText(GetString(StringID::STATUS_READY));
+        }
+        else
+        {
+            if (!raopServer)
+            {
+                m_labelStatus->setText(QString::fromStdWString(L"..."s));
+            }
+            else
+            {
+                m_labelStatus->setText(
+                    QString::fromStdWString(ErrorToString(raopServer->GetErrorCode())));
+            }
+        }
     }
     else
     {

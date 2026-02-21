@@ -26,7 +26,7 @@ public:
     unsigned int GetControlPort() const noexcept;
     unsigned int GetTimingPort() const noexcept;
 
-    void Flush(unsigned int seq = 0);
+    void Flush(unsigned int seq = 0) noexcept;
 
     const std::string& GetClientID() const noexcept;
 

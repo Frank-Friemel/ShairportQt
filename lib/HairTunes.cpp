@@ -551,7 +551,7 @@ void HairTunes::RequestResend(const USHORT nSeq, const short nCount) noexcept
     }
 }
 
-void HairTunes::Flush(unsigned int seq /*= 0*/)
+void HairTunes::Flush(unsigned int seq /*= 0*/) noexcept
 {
     unique_lock<mutex> sync(m_mtxQueue);
 
