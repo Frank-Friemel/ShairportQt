@@ -12,6 +12,12 @@
 #include "localization/LanguageManager.h"
 #include "Trim.h"
 
+#ifdef Q_OS_WIN
+#include "WindowsMultimediaStateReceiver.h"
+#else
+#include "LinuxMultimediaStateReceiver.h"
+#endif
+
 #include <spdlog/sinks/msvc_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
@@ -136,8 +142,12 @@ int main(int argc, char** argv)
         // initializing the config
         InitializeConfig(config);
 
+        // create MultimediaStateReceiver which integrates the MM-state into the System
+        shared_ptr<IMultimediaStateReceiver> multimediaStateReceiver =
+            make_shared<MultimediaStateReceiver>(VariantValue::Key("SystemIntegratedMultimediaState").TryGet<bool>(config).value_or(true));
+
         // create GUI
-        MainDlg mainDialog(app.get(), config, strConfigName);
+        MainDlg mainDialog(app.get(), config, strConfigName, move(multimediaStateReceiver));
 
         // QT best practices:
         // https://de.slideshare.net/slideshow/how-to-make-your-qt-app-look-native/2622616

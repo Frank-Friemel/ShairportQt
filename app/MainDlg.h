@@ -32,6 +32,8 @@
 #include "dnssd.h"
 #include "DacpService.h"
 #include "KeyboardHook.h"
+#include "IMultimediaStateReceiver.h"
+#include "IMultimediaStateProvider.h"
 
 class TimeLabel;
 
@@ -44,11 +46,15 @@ class MainDlg
     , public IDnsSDEvents
     , protected KeyboardHook::ICallback
     , public IRtpRequestHandler
+    , protected IMultimediaStateProvider
 {
     Q_OBJECT
 
 public:
-    MainDlg(QApplication* app, const SharedPtr<IValueCollection>& config, const std::string& configName);
+    MainDlg(QApplication* app,
+        const SharedPtr<IValueCollection>& config,
+        const std::string& configName,
+        std::shared_ptr<IMultimediaStateReceiver>&& multimediaStateReceiver);
     ~MainDlg();
 
 private:
@@ -94,6 +100,12 @@ protected:
 
     // IRtpRequestHandler implementation
     void OnRequest(RtpEndpoint*, std::unique_ptr<RtpPacket>&& packet) override;
+
+    // IMultimediaStateProvider implementation
+    void PlayPause() noexcept override;
+    void SkipNext() noexcept override;
+    void SkipPrevious() noexcept override;
+    bool GetTrackInfo(std::wstring& track, std::wstring& album, std::wstring& artist, std::vector<unsigned char>& art) noexcept override;
 
 signals:
     void ShowMessage(int text) const;
@@ -225,4 +237,7 @@ private:
     // global instance handling
     QPointer<QSharedMemory>             m_instance;
     std::unique_ptr<RtpEndpoint>        m_instanceEndpoint;
+
+    // Multimedia State Receiver
+    const std::shared_ptr<IMultimediaStateReceiver> m_multimediaStateReceiver;
 };

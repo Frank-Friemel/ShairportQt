@@ -11,6 +11,7 @@
 #include <QSlider>
 #include <QComboBox>
 #include <QUrl>
+#include <QBuffer>
 
 #include "localization/StringIDs.h"
 #include <spdlog/spdlog.h>
@@ -32,7 +33,10 @@ using namespace literals;
 using namespace WinToastLib;
 #endif
 
-MainDlg::MainDlg(QApplication* app, const SharedPtr<IValueCollection>& config, const std::string& configName)
+MainDlg::MainDlg(QApplication* app,
+    const SharedPtr<IValueCollection>& config,
+    const std::string& configName,
+    shared_ptr<IMultimediaStateReceiver>&& multimediaStateReceiver)
     : m_app{ app }
     , m_config{ config }
     , m_strConfigName{ configName }
@@ -41,8 +45,10 @@ MainDlg::MainDlg(QApplication* app, const SharedPtr<IValueCollection>& config, c
     , m_iconPlay{ ":/play.png" }
     , m_iconPause{ ":/pause.png" }
     , m_handleKeyboardHook{ KeyboardHook::Setup(this) }
+    , m_multimediaStateReceiver { std::move(multimediaStateReceiver) }
 {
     assert(m_app);
+    assert(m_multimediaStateReceiver);
 
     if (VariantValue::Key("GlobalInstanceHandler").TryGet<bool>(config).value_or(true))
     {
@@ -663,8 +669,8 @@ void MainDlg::ConfigureSystemTray()
 #ifdef Q_OS_WIN
             if (WinToast::isCompatible() && VariantValue::Key("UseWinToast").TryGet<bool>(m_config).value_or(true))
             {
-                WinToast::instance()->setAppName(L"ShairportQT");
-                WinToast::instance()->setAppUserModelId(WinToast::configureAUMI(L"Shairport"s, L"ShairportQT"s, L"Audio"s, L"1.0"s));
+                WinToast::instance()->setAppName(L"Shairport");
+                WinToast::instance()->setAppUserModelId(WinToast::configureAUMI(L"Airplay"s, L"Shairport"s, L"Audio"s, L"1.0"s));
                 
                 if (!WinToast::instance()->initialize())
                 {
@@ -1243,6 +1249,8 @@ void MainDlg::OnUpdateMMState()
     m_buttonVolumeDown->setEnabled(enabled);
     m_buttonVolumeUp->setEnabled(enabled);
     m_buttonPlayPauseTrack->setEnabled(enabled);
+
+    m_multimediaStateReceiver->OnUpdateMMState(enabled);
 }
 
 void MainDlg::OnPlayState(bool isPlaying)
@@ -1267,6 +1275,7 @@ void MainDlg::OnPlayState(bool isPlaying)
     }
     if (wasPlaying != isPlaying)
     {
+        m_multimediaStateReceiver->OnPlayState(isPlaying);
         OnUpdateTray();
     }
 }
@@ -1293,7 +1302,6 @@ void MainDlg::OnDmapInfo(QString album, QString track, QString artist)
 
 void MainDlg::OnUpdateTray()
 {
-    if (m_systemTray && QSystemTrayIcon::supportsMessages() && VariantValue::Key("TrayTrackInfo").TryGet<bool>(m_config).value_or(false))
     {
         const lock_guard<recursive_mutex> guard(m_mtxTitleInfo);
 
@@ -1310,14 +1318,17 @@ void MainDlg::OnUpdateTray()
                     // wait 1000ms to be sure the album art has arrived as well
                     m_timePointShowToastMessage = make_unique<TimePoint>(chrono::steady_clock::now() + 1000ms);
                 }
-                QString toolTip = tr("ShairportQt - ") + m_strCurrentArtistInTray + tr(" - ") + m_strCurrentTrack;
-
-                if (toolTip.length() > 100)
+                if (m_systemTray && QSystemTrayIcon::supportsMessages() && VariantValue::Key("TrayTrackInfo").TryGet<bool>(m_config).value_or(false))
                 {
-                    // shorten the tooltip if it's too long
-                    toolTip = toolTip.left(97) + tr("...");
+                    QString toolTip = tr("ShairportQt - ") + m_strCurrentArtistInTray + tr(" - ") + m_strCurrentTrack;
+
+                    if (toolTip.length() > 100)
+                    {
+                        // shorten the tooltip if it's too long
+                        toolTip = toolTip.left(97) + tr("...");
+                    }
+                    m_systemTray->setToolTip(toolTip);
                 }
-                m_systemTray->setToolTip(toolTip);
             }
         }
         else
@@ -1329,6 +1340,7 @@ void MainDlg::OnUpdateTray()
             m_systemTray->setToolTip(tr("ShairportQt"));
         }
     }
+    m_multimediaStateReceiver->OnUpdateTrackInfo();
 }
 
 // Widget slot: ShowToastMessage
@@ -1472,6 +1484,7 @@ void MainDlg::OnShowToastMessage()
 #endif            
         }
     }
+    m_multimediaStateReceiver->OnUpdateTrackInfo();
 }
 
 // Widget slot: state of CheckBox "Title Info" changed
@@ -1509,13 +1522,16 @@ void MainDlg::OnSettingTitleInfoView(Qt::CheckState state)
 // Widget slot: ShowAdArt
 void MainDlg::OnShowAdArt()
 {
-    const lock_guard<recursive_mutex> guard(m_mtxTitleInfo);
-
-    if (m_imageAlbumArt)
     {
-        m_imageAlbumArt->setPixmap(m_pixmapShairport);
-        m_currentAlbumArt.reset();
+        const lock_guard<recursive_mutex> guard(m_mtxTitleInfo);
+
+        if (m_imageAlbumArt)
+        {
+            m_imageAlbumArt->setPixmap(m_pixmapShairport);
+            m_currentAlbumArt.reset();
+        }
     }
+    m_multimediaStateReceiver->OnUpdateTrackInfo();
 }
 
 // Widget slot: show album art
@@ -1581,6 +1597,7 @@ void MainDlg::OnAlbumArt()
     {
         spdlog::error("failed to setPixmap: {}", e.what());
     }
+    m_multimediaStateReceiver->OnUpdateTrackInfo();
 }
 
 // Widget slot: UpdateWidgets
@@ -1758,6 +1775,9 @@ void MainDlg::closeEvent(QCloseEvent* event)
         // remove all collected DACP infos
         mapDacpService.clear();
 
+        // cleanup MultimediaStateReceiver
+        m_multimediaStateReceiver->Cleanup();
+
         try
         {
             m_instanceEndpoint.reset();
@@ -1807,6 +1827,9 @@ void MainDlg::showEvent(QShowEvent* event)
 
     if (firstShowEvent)
     {
+        // initialize MultimediaStateReceiver
+        m_multimediaStateReceiver->Initialize(this, reinterpret_cast<NativeWindowHandle>(this->winId()));
+
         m_firstShowEvent = false;
     
         if (VariantValue::Key("StartMinimized").TryGet<bool>(m_config).value_or(false))
@@ -1923,6 +1946,77 @@ void MainDlg::OnKeyPressed(KeyboardHook::Key key) noexcept
     {
         spdlog::error("OnKeyPressed: failed to send DACP command for key", (int)key);
     }
+}
+
+void MainDlg::PlayPause() noexcept 
+{
+    try
+    {
+        SendDacpCommand("playpause"s);
+    }
+    catch(...)
+    {
+    }
+}
+
+void MainDlg::SkipNext() noexcept
+{
+    try
+    {
+        SendDacpCommand("nextitem"s);
+    }
+    catch(...)
+    {
+    }
+}
+
+void MainDlg::SkipPrevious() noexcept
+{
+    try
+    {
+        SendDacpCommand("previtem"s);
+    }
+    catch(...)
+    {
+    }
+}
+
+bool MainDlg::GetTrackInfo(wstring& track, wstring& album, wstring& artist, vector<unsigned char>& art) noexcept
+{
+    try
+    {
+        const lock_guard<recursive_mutex> guard(m_mtxTitleInfo);
+        track = m_strCurrentTrackInTray.toStdWString();
+        album = m_strCurrentAlbum.toStdWString();
+        artist = m_strCurrentArtistInTray.toStdWString();
+
+        if (track.empty() && !m_strCurrentTrack.isEmpty())
+        {
+            track = m_strCurrentTrack.toStdWString();
+        }
+        if (artist.empty() && !m_strCurrentArtist.isEmpty())
+        {
+            artist = m_strCurrentArtist.toStdWString();
+        }
+        const QPixmap& pixmap = m_currentAlbumArt ? *m_currentAlbumArt : m_pixmapShairport;
+
+        QByteArray array;
+        QBuffer buffer(&array);
+        
+        if (buffer.open(QIODevice::WriteOnly))
+        {
+            if (pixmap.save(&buffer, "PNG", 100))
+            {
+                art.resize(array.size());
+                memcpy(art.data(), array.data(), art.size());
+            }
+        }
+        return true;
+    }
+    catch(...)
+    {
+    }
+    return false;
 }
 
 // Widget slot: show about dialog

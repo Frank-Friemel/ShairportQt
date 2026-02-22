@@ -225,12 +225,12 @@ void RaopServer::Run() noexcept
 								try
 								{
 									Service s{ interfaceIndex, serviceName, regtype, replyDomain };
-
+#if 0
 									spdlog::debug("{} raop service {} with type {}", 
 										registered ? "registered"s : "unregistered"s, 
 										s.m_serviceName, 
 										s.m_regtype);
-
+#endif
 									if (registered)
 									{
 										auto h = m_dnsSD->ResolveService(s.m_interfaceIndex, s.m_serviceName, s.m_regtype, s.m_replyDomain, this);
@@ -260,6 +260,7 @@ void RaopServer::Run() noexcept
 								const char*,
 								uint16_t port) noexcept override
 							{
+#if 0								
 								try
 								{
 									string hostName = hosttarget ? hosttarget : ""s;
@@ -271,6 +272,7 @@ void RaopServer::Run() noexcept
 								catch(...)
 								{
 								}
+#endif
 							}
 					} browseEvents{ m_dnsSD };
 					const auto handle = m_dnsSD->BrowseForService("_raop._tcp", &browseEvents);

@@ -57,7 +57,7 @@ std::string EncodeToHex(const T& buffer, bool bForceUppercase = false)
 class ScopeContext
 {
 public:
-	ScopeContext(const std::function<void()>& scopeCleanup);
+	ScopeContext(std::function<void()>&& scopeCleanup) noexcept;
 	~ScopeContext();
 
 	ScopeContext(const ScopeContext&) = delete;

@@ -5,7 +5,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # locate packages
@@ -55,10 +55,21 @@ set(LOCALIZATION_SOURCES    app/localization/LanguageManager.cpp
                             app/localization/Spanish.cpp
                             app/localization/Catalan.cpp)
 
+if (UNIX)
+
+set(SYSTEM_NATIVE_APP_SOURCES app/LinuxMultimediaStateReceiver.cpp)
+
+else()
+
+set(SYSTEM_NATIVE_APP_SOURCES app/WindowsMultimediaStateReceiver.cpp)
+
+endif()
+
 set(APP_SOURCES app/main.cpp
                 app/MainDlg.cpp
                 app/DacpService.cpp
                 app/TimeLabel.cpp
+                ${SYSTEM_NATIVE_APP_SOURCES}
                 ${LOCALIZATION_SOURCES})
 
 set(APP_RESOURCE res/resource.qrc)
