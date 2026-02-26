@@ -14,5 +14,8 @@
         <file>volume_up.png</file>
         <file>ArtShadow.png</file>
         <file>AdShadow.png</file>
+        <file>info-16.ico</file>
+        <file>minimize-16.ico</file>
+        <file>minimize.png</file>
     </qresource>
 </RCC>

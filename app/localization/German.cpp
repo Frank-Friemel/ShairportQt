@@ -55,6 +55,12 @@ namespace Localization::German
 		case StringID::MENU_ABOUT:
 			return CW2AEX(L"\xdc"s) + "be&r..."s;
 		
+		case StringID::MENU_MINIMIZE:
+			return "&Minimieren"s;
+
+		case StringID::LABEL_MINIMIZE:
+			return "Minimieren"s;
+
 		case StringID::LABEL_AIRPORT_NAME:
 			return "Airport Name"s;		
 		

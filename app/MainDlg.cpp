@@ -402,12 +402,14 @@ void MainDlg::CreateMenuBar()
     QPointer<QMenu> fileMenu = new QMenu(GetString(StringID::MENU_FILE), this);
 
     const auto strQuit = GetString(StringID::MENU_QUIT);
+    const auto strMinimize = GetString(StringID::MENU_MINIMIZE);
 
 #ifdef Q_OS_WIN
     const QKeySequence quitShortcutSequence(QKeySequence::StandardKey::Close);
 #else
     const QKeySequence quitShortcutSequence(QKeySequence::StandardKey::Quit);
 #endif
+    fileMenu->addAction(QIcon(":/minimize-16.ico"), strMinimize, this, &MainDlg::Minimize);
     fileMenu->addAction(QIcon(":/exit-16.ico"), strQuit, this, &MainDlg::OnQuit, quitShortcutSequence);
 
     QPointer<QMenu> editMenu = new QMenu(GetString(StringID::MENU_EDIT), this);
@@ -426,7 +428,17 @@ void MainDlg::WidgetCreateStatusGroup()
     QPointer<QHBoxLayout> layout = new QHBoxLayout;
 
     m_labelStatus = new QLabel;
-    layout->addWidget(m_labelStatus);
+    layout->addWidget(m_labelStatus, 2);
+
+    m_buttonMinimize = new QPushButton(QIcon(":/minimize.png"), tr(""));
+    m_buttonMinimize->setFlat(true);
+    m_buttonMinimize->setStyleSheet("QPushButton { background-color: transparent; border: 0px }"
+        "QPushButton:hover { background-color: rgba(192, 192, 192, 0.2) }");
+    m_buttonMinimize->setToolTip(GetString(StringID::LABEL_MINIMIZE));
+
+    connect(m_buttonMinimize, &QPushButton::clicked, [this]() { Minimize(); });
+
+    layout->addWidget(m_buttonMinimize);
 
     m_groupBoxStatus = new QGroupBox;
     m_groupBoxStatus->setSizePolicy(QSizePolicy::Policy::Expanding, QSizePolicy::Policy::Fixed);
@@ -1835,25 +1847,30 @@ void MainDlg::showEvent(QShowEvent* event)
         if (VariantValue::Key("StartMinimized").TryGet<bool>(m_config).value_or(false))
         {
             spdlog::info("start minimized");
-            setWindowState(Qt::WindowMinimized);
-
-            // only hide Window, if we do have a tray icon
-            // otherwise we won't be able to restore the Window again
-            if (QSystemTrayIcon::isSystemTrayAvailable() &&
-                VariantValue::Key("TrayIcon").TryGet<bool>(m_config).value_or(true))
-            {
-                auto asyncHideWindow = async(launch::async, [this]() -> void
-                {
-                    this_thread::sleep_for(100ms);
-                    HideWindow();
-                });
-                const lock_guard<mutex> guard(m_mtx);
-                m_listAsyncOperations.emplace_back(std::move(asyncHideWindow));
-            }
+            Minimize();
         }
     }
     emit UpdateWidgets();
     QWidget::showEvent(event);
+}
+
+void MainDlg::Minimize()
+{
+    setWindowState(Qt::WindowMinimized);
+
+    // only hide Window, if we do have a tray icon
+    // otherwise we won't be able to restore the Window again
+    if (QSystemTrayIcon::isSystemTrayAvailable() &&
+        VariantValue::Key("TrayIcon").TryGet<bool>(m_config).value_or(true))
+    {
+        auto asyncHideWindow = async(launch::async, [this]() -> void
+        {
+            this_thread::sleep_for(100ms);
+            HideWindow();
+        });
+        const lock_guard<mutex> guard(m_mtx);
+        m_listAsyncOperations.emplace_back(std::move(asyncHideWindow));
+    }
 }
 
 // Widget override: Window is collapsing

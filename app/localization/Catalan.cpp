@@ -54,6 +54,12 @@ namespace Localization::Catalan
 		case StringID::MENU_ABOUT:
 			return "&Sobre..."s;
 
+		case StringID::MENU_MINIMIZE:
+			return "&Minimitzar"s;
+
+		case StringID::LABEL_MINIMIZE:
+			return "Minimitzar"s;
+
 		case StringID::LABEL_AIRPORT_NAME:
 			return "Nom Airport"s;
 

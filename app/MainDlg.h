@@ -70,6 +70,8 @@ private:
     void ConfigureSystemTray();
     void SendDacpCommand(const std::string& cmd);
 
+    void Minimize();
+    
     QString GetString(int id) const;
     std::string GetAutoStartConfig() const;
 
@@ -184,7 +186,8 @@ private:
     // Status Group
     QPointer<QGroupBox>                 m_groupBoxStatus;
     QPointer<QLabel>                    m_labelStatus;
-    
+    QPointer<QPushButton>               m_buttonMinimize;
+
     // Airport Group
     QPointer<QGroupBox>                 m_groupBoxAirport;
     QPointer<QPushButton>               m_buttonChangeAirport;

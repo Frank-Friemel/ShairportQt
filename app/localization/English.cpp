@@ -54,6 +54,12 @@ namespace Localization::English
 		case StringID::MENU_ABOUT:
 			return "&About..."s;
 
+		case StringID::MENU_MINIMIZE:
+			return "&Minimize"s;
+
+		case StringID::LABEL_MINIMIZE:
+			return "Minimize"s;
+
 		case StringID::LABEL_AIRPORT_NAME:
 			return "Airport Name"s;
 
