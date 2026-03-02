@@ -2547,6 +2547,13 @@ void MainDlg::OnOptions()
         {
             VariantValue::Key("SystemIntegratedMultimediaControl").Set(m_config, newSysMediaControl);
             m_multimediaStateReceiver->Configure(newSysMediaControl);
+
+            if (newSysMediaControl)
+            {
+                UpdateMMState();
+                m_multimediaStateReceiver->OnPlayState(m_isPlaying);
+                m_multimediaStateReceiver->OnUpdateTrackInfo();
+            }
         }
         if (newLogToFile != logToFile)
         {

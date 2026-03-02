@@ -97,10 +97,12 @@ void MultimediaStateReceiver::Start() noexcept
                 SystemMediaTransportControls smtc{nullptr};
                 HRESULT hr = E_FAIL;
 
-                const ScopeContext disableSmtc([&smtc]{
+                const ScopeContext cleanupSmtc([&smtc]{
                     if (smtc)
                     {
+                        smtc.DisplayUpdater().ClearAll();
                         smtc.IsEnabled(false);
+                        smtc = nullptr;
                     }
                 });
 
@@ -126,7 +128,7 @@ void MultimediaStateReceiver::Start() noexcept
 
                     smtc.IsStopEnabled(false);
 
-                    smtc.ButtonPressed([this, &lastPlayPauseButtonPress, &smtc](const SystemMediaTransportControls&,
+                    auto token = smtc.ButtonPressed([this, &lastPlayPauseButtonPress, &smtc](const SystemMediaTransportControls&,
                         const SystemMediaTransportControlsButtonPressedEventArgs& args)
                         {
                             using Button = SystemMediaTransportControlsButton;
@@ -163,6 +165,10 @@ void MultimediaStateReceiver::Start() noexcept
                             }
                         });
     
+                    const ScopeContext cleanupButtonHandler([&smtc, &token]() {
+                        // remove event handler
+                        smtc.ButtonPressed(token);
+                    });
                     unique_lock<mutex> guard{ m_mtx };
 
                     bool prevIsEnabled = m_isEnabled;
