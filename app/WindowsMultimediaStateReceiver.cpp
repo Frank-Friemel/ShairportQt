@@ -35,19 +35,22 @@ MultimediaStateReceiver::~MultimediaStateReceiver()
 
 void MultimediaStateReceiver::Configure(bool enable) noexcept
 {
-    m_enabledByConfig = enable;
+    if (m_enabledByConfig != enable)
+    {
+        m_enabledByConfig = enable;
 
-    if (enable)
-    {
-        Start();
-    }
-    else
-    {
-        Stop();
+        if (enable)
+        {
+            Start();
+        }
+        else
+        {
+            Stop();
+        }
     }
 }
 
-void MultimediaStateReceiver::Initialize(IMultimediaStateProvider* provider, NativeWindowHandle nativeWindowHandle) noexcept
+void MultimediaStateReceiver::Initialize(IMultimediaStateProvider* provider, QObject*, NativeWindowHandle nativeWindowHandle) noexcept
 {
     assert(provider);
     swap(m_provider, provider);
@@ -341,13 +344,13 @@ void MultimediaStateReceiver::Start() noexcept
             else
             {
                 swap(m_thread, t);
-                spdlog::info("succeeded to initialize MultimediaStateReceiver's SystemMediaTransportControls");
+                spdlog::info("succeeded to start MultimediaStateReceiver's SystemMediaTransportControls");
             }
         }
     }
     catch (const exception& e)
     {
-         spdlog::error("failed to initialize MultimediaStateReceiver's SystemMediaTransportControls: {}", e.what());
+         spdlog::error("failed to start MultimediaStateReceiver's SystemMediaTransportControls: {}", e.what());
     }
 }
 
@@ -426,4 +429,9 @@ void MultimediaStateReceiver::OnUpdateTrackInfo() noexcept
         m_work = true;
         m_cv.notify_all();
     }
+}
+
+void MultimediaStateReceiver::OnUpdateVolume(double) noexcept
+{
+    // not implemented
 }

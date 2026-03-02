@@ -144,7 +144,7 @@ int main(int argc, char** argv)
 
         // create MultimediaStateReceiver which integrates the MM-state into the System
         shared_ptr<IMultimediaStateReceiver> multimediaStateReceiver =
-            make_shared<MultimediaStateReceiver>(VariantValue::Key("SystemIntegratedMultimediaState").TryGet<bool>(config).value_or(true));
+            make_shared<MultimediaStateReceiver>(VariantValue::Key("SystemIntegratedMultimediaControl").TryGet<bool>(config).value_or(true));
 
         // create GUI
         MainDlg mainDialog(app.get(), config, strConfigName, move(multimediaStateReceiver));

@@ -93,6 +93,7 @@ if (MSVC)
 else()
     # dismiss several warnings
     target_compile_options(ShairportQt PRIVATE -Wno-deprecated-declarations -Wnarrowing)
+    set_target_properties(ShairportQt PROPERTIES AUTOMOC TRUE)
 endif()
 
 target_link_libraries(ShairportQt PRIVATE ShairLib)

@@ -115,6 +115,8 @@ MainDlg::MainDlg(QApplication* app,
         painter.end();
         m_pixmapShairport = QPixmap::fromImage(surface);
     }
+    m_currentVolume = VariantValue::Key("Volume").Get<int64_t>(m_config);
+
     // create signal/slot connections
     connect(this, &MainDlg::ShowMessage, this, &MainDlg::OnShowMessage);
     connect(this, &MainDlg::UpdateMMState, this, &MainDlg::OnUpdateMMState);
@@ -128,6 +130,7 @@ MainDlg::MainDlg(QApplication* app,
     connect(this, &MainDlg::ShowToastMessage, this, &MainDlg::OnShowToastMessage);
     connect(this, &MainDlg::ActivateWindow, this, &MainDlg::OnActivateWindow);
     connect(this, &MainDlg::HideWindow, this, &MainDlg::OnHideWindow);
+    connect(this, &MainDlg::Quit, this, &MainDlg::OnQuit);
 
     setWindowIcon(QIcon(":/ShairportQt.png"));
     setWindowTitle(tr("Shairport"));
@@ -360,6 +363,19 @@ void MainDlg::RunScheduler() noexcept
                     }
                 }
                 assert(!sync.owns_lock());
+
+                // volume changes?
+                // check only, if no volume adjustments are ongoing
+                if (m_threadSetVolume.threads() == 0)
+                {
+                    const int64_t currentVolume = VariantValue::Key("Volume").Get<int64_t>(m_config);
+
+                    if (m_currentVolume != currentVolume)
+                    {
+                        m_currentVolume = currentVolume;
+                        m_multimediaStateReceiver->OnUpdateVolume(pow(10.0, currentVolume * 0.00005));
+                    }
+                }
 
                 // any toast message pending?
                 if (m_timePointShowToastMessage)
@@ -1403,7 +1419,7 @@ void MainDlg::OnShowToastMessage()
                                 try
                                 {
                                     m_pathImageFile = buf;
-                                    m_pathImageFile += ("ShairportQT_TempImage_"s +
+                                    m_pathImageFile += ("ShairportQt_TempAlbumArt_"s +
                                             to_string(++fileImagePostFix) +
                                             ".png"s);
                                     DeleteFileA(m_pathImageFile.c_str());
@@ -1789,6 +1805,7 @@ void MainDlg::closeEvent(QCloseEvent* event)
 
         // cleanup MultimediaStateReceiver
         m_multimediaStateReceiver->Cleanup();
+        m_threadSetVolume.clear();
 
         try
         {
@@ -1839,8 +1856,8 @@ void MainDlg::showEvent(QShowEvent* event)
 
     if (firstShowEvent)
     {
-        // initialize MultimediaStateReceiver
-        m_multimediaStateReceiver->Initialize(this, reinterpret_cast<NativeWindowHandle>(this->winId()));
+        // initialize System Integrated Multimedia Control
+        m_multimediaStateReceiver->Initialize(this, this, reinterpret_cast<NativeWindowHandle>(this->winId()));
 
         m_firstShowEvent = false;
     
@@ -1858,10 +1875,15 @@ void MainDlg::Minimize()
 {
     setWindowState(Qt::WindowMinimized);
 
-    // only hide Window, if we do have a tray icon
+    // only hide Window, if we do have a tray icon (or MPRIS on Linux)
     // otherwise we won't be able to restore the Window again
     if (QSystemTrayIcon::isSystemTrayAvailable() &&
-        VariantValue::Key("TrayIcon").TryGet<bool>(m_config).value_or(true))
+            (VariantValue::Key("TrayIcon").TryGet<bool>(m_config).value_or(true)
+ #ifdef Q_OS_UNIX
+             || VariantValue::Key("SystemIntegratedMultimediaControl").TryGet<bool>(m_config).value_or(true)
+ #endif
+            )
+       )
     {
         auto asyncHideWindow = async(launch::async, [this]() -> void
         {
@@ -1965,6 +1987,31 @@ void MainDlg::OnKeyPressed(KeyboardHook::Key key) noexcept
     }
 }
 
+bool MainDlg::GetServiceName(std::string& name, std::string& subName) const noexcept
+{
+    try
+    {
+        name    = "Shairport"s;
+        subName = EncodeToHex(VariantValue::Key("HWaddress").Get<vector<uint8_t>>(m_config));
+        return true;
+    }
+    catch(...)
+    {
+    }
+    return false;
+}
+
+void MainDlg::GetDesktopEntry(std::string& entry) const noexcept
+{
+    try
+    {
+        entry = "org.shairport.ShairportQt"s;
+    }
+    catch(...)
+    {
+    }
+}
+
 void MainDlg::PlayPause() noexcept 
 {
     try
@@ -1995,6 +2042,75 @@ void MainDlg::SkipPrevious() noexcept
     }
     catch(...)
     {
+    }
+}
+
+double MainDlg::GetVolume() const noexcept
+{
+    const double lfVolume = pow(10.0, VariantValue::Key("Volume").Get<int64_t>(m_config) * 0.00005);
+    assert(lfVolume > 0. && lfVolume <= 1.);
+    return lfVolume;
+}
+
+void MainDlg::SetVolume(double v) noexcept
+{
+    try
+    {
+        m_threadSetVolume.emplace_back([this, targetVolume = v]() 
+        {
+            const ScopeContext determineCurrentVolume([this]() {
+                m_currentVolume = VariantValue::Key("Volume").Get<int64_t>(m_config);
+            });
+
+            double currentVolume = pow(10.0, VariantValue::Key("Volume").Get<int64_t>(m_config) * 0.00005);
+
+            if (targetVolume > currentVolume)
+            {
+                do
+                {
+                    SendDacpCommand("volumeup"s);
+                    
+                    int tries = 0;
+                    while (currentVolume == pow(10.0, VariantValue::Key("Volume").Get<int64_t>(m_config) * 0.00005))
+                    {
+                        // if the volume didn't change -> we wait here
+                        this_thread::sleep_for(10ms);
+
+                        if (tries++ > 20)
+                        {
+                            return;
+                        }
+                    }
+                    currentVolume = pow(10.0, VariantValue::Key("Volume").Get<int64_t>(m_config) * 0.00005);
+                } 
+                while (targetVolume > currentVolume);
+            }
+            else if (targetVolume < currentVolume)
+            {
+                do
+                {
+                    SendDacpCommand("volumedown"s);
+
+                    int tries = 0;
+                    while (currentVolume == pow(10.0, VariantValue::Key("Volume").Get<int64_t>(m_config) * 0.00005))
+                    {
+                        // if the volume didn't change -> we wait here
+                        this_thread::sleep_for(10ms);
+
+                        if (tries++ > 20)
+                        {
+                            return;
+                        }
+                    }
+                    currentVolume = pow(10.0, VariantValue::Key("Volume").Get<int64_t>(m_config) * 0.00005);
+                } 
+                while (targetVolume < currentVolume);
+            }
+        });
+    }
+    catch (const exception& e)
+    {
+        spdlog::error("failed to set volume: {}", e.what());
     }
 }
 
@@ -2034,6 +2150,28 @@ bool MainDlg::GetTrackInfo(wstring& track, wstring& album, wstring& artist, vect
     {
     }
     return false;
+}
+
+void MainDlg::ShowWindow() noexcept
+{
+    try
+    {
+        ActivateWindow();
+    }
+    catch(...)
+    {
+    }
+}
+
+void MainDlg::QuitApp() noexcept
+{
+    try
+    {
+        Quit();
+    }
+    catch(...)
+    {
+    }
 }
 
 // Widget slot: show about dialog

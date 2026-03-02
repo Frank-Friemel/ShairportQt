@@ -1674,6 +1674,16 @@ bool MoveFileA(const char* lpExistingFileName, const char* lpNewFileName)
     return 0 == rename(lpExistingFileName, lpNewFileName);
 }
 
+int GetTempPathA(int size, char* buf)
+{
+    if (size > 5)
+    {
+        strcpy(buf, "/tmp/");
+        return 5;
+    }
+    return 0;
+}
+
 #endif // _WIN32
 
 int Variant::VarTypePriority(VARTYPE vt) noexcept
