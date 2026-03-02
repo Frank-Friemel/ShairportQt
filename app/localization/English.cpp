@@ -129,6 +129,12 @@ namespace Localization::English
 		case StringID::LABEL_DISABLE_MM_CONTROL:
 			return "Disable Multimedia Controls"s;
 
+		case StringID::LABEL_ENABLE_SYS_MM_CONTROL:
+#ifdef _WIN32
+			return "System Integrated Media Control (SMTC)"s;
+#else
+			return "System Integrated Media Control (MPRIS)"s;
+#endif
 		case StringID::LABEL_DEFAULT_DEVICE:
 			return "System default Device"s;
 

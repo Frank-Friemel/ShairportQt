@@ -2437,6 +2437,7 @@ void MainDlg::OnOptions()
     const auto audioDevice      = VariantValue::Key("AudioDevice").TryGet<string>(m_config).value_or("default"s);
     const auto logToFile        = VariantValue::Key("DebugLogFile").TryGet<bool>(m_config).value_or(false);
     const auto noMediaControl   = VariantValue::Key("NoMediaControl").TryGet<bool>(m_config).value_or(false);
+    const auto sysMediaControl  = VariantValue::Key("SystemIntegratedMultimediaControl").TryGet<bool>(m_config).value_or(true);
 
     QPointer<QDialog> dlg = new QDialog(this);
 
@@ -2514,6 +2515,9 @@ void MainDlg::OnOptions()
 
     QPointer<QCheckBox> mediaControlOption = new QCheckBox(GetString(StringID::LABEL_DISABLE_MM_CONTROL));
     mediaControlOption->setCheckState(noMediaControl ? Qt::CheckState::Checked : Qt::CheckState::Unchecked);
+    
+    QPointer<QCheckBox> sysMMControlOption = new QCheckBox(GetString(StringID::LABEL_ENABLE_SYS_MM_CONTROL));
+    sysMMControlOption->setCheckState(sysMediaControl ? Qt::CheckState::Checked : Qt::CheckState::Unchecked);
 
     QPointer<QVBoxLayout> mainLayout = new QVBoxLayout(dlg);
 
@@ -2521,6 +2525,7 @@ void MainDlg::OnOptions()
     mainLayout->addWidget(soundDeviceGroup);
     mainLayout->addWidget(logToFileOption);
     mainLayout->addWidget(mediaControlOption);
+    mainLayout->addWidget(sysMMControlOption);    
     mainLayout->addWidget(buttonBox);
 
     dlg->setLayout(mainLayout);
@@ -2531,11 +2536,17 @@ void MainDlg::OnOptions()
         const string newAudioDevice     = soundDeviceDropList->currentData().toString().toStdString();
         const bool newLogToFile         = logToFileOption->checkState() == Qt::CheckState::Checked;
         const bool newNoMediaControl    = mediaControlOption->checkState() == Qt::CheckState::Checked;
+        const bool newSysMediaControl   = sysMMControlOption->checkState() == Qt::CheckState::Checked;
 
         if (newNoMediaControl != noMediaControl)
         {
             VariantValue::Key("NoMediaControl").Set(m_config, newNoMediaControl);
             ConfigureDacpBrowser();
+        }
+        if (newSysMediaControl != sysMediaControl)
+        {
+            VariantValue::Key("SystemIntegratedMultimediaControl").Set(m_config, newSysMediaControl);
+            m_multimediaStateReceiver->Configure(newSysMediaControl);
         }
         if (newLogToFile != logToFile)
         {
