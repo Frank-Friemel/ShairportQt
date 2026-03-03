@@ -3,6 +3,7 @@
 #include <spdlog/spdlog.h>
 #include <time.h>
 #include <unistd.h>
+#include <string>
 
 #include <QDBusAbstractAdaptor>
 #include <QDBusConnection>
@@ -30,9 +31,7 @@ class DBusAbstractAdaptor
     Q_OBJECT
 
 public:
-    DBusAbstractAdaptor(QObject *parent);
-
-    void SetDBusPath(const QString &path);
+    DBusAbstractAdaptor(QObject *parent, const QString& path);
 
 protected:
     void SignalPropertyChange(const QString &property, const QVariant &value);
@@ -45,19 +44,15 @@ private:
     recursive_mutex m_mtx;
     QStringList     m_invalidatedProperties;
     QVariantMap     m_updatedProperties;
-    QString         m_path;
+    const QString   m_path;
     QDBusConnection m_connection;
 };
 
-DBusAbstractAdaptor::DBusAbstractAdaptor(QObject *parent)
+DBusAbstractAdaptor::DBusAbstractAdaptor(QObject *parent, const QString& path)
     : QDBusAbstractAdaptor{ parent }
+    , m_path{ path }
     , m_connection{ QDBusConnection::sessionBus() }
 {
-}
-
-void DBusAbstractAdaptor::SetDBusPath(const QString &path)
-{
-    m_path = path;
 }
 
 void DBusAbstractAdaptor::SignalPropertyChange(const QString &property, const QVariant &value)
@@ -145,7 +140,7 @@ class MediaPlayer2
     Q_PROPERTY(QStringList SupportedMimeTypes READ SupportedMimeTypes)
 
 public:
-    MediaPlayer2(IMultimediaStateProvider* provider, QObject* parent = nullptr);
+    MediaPlayer2(IMultimediaStateProvider* provider, QObject* parent, const QString& path);
     ~MediaPlayer2();
 
     // properties implementation
@@ -171,8 +166,8 @@ private:
     IMultimediaStateProvider* const m_provider;
 };
 
-MediaPlayer2::MediaPlayer2(IMultimediaStateProvider* provider, QObject* parent /*= nullptr*/)
-    : DBusAbstractAdaptor{ parent }
+MediaPlayer2::MediaPlayer2(IMultimediaStateProvider* provider, QObject* parent, const QString& path)
+    : DBusAbstractAdaptor{ parent, path }
     , m_provider{ provider }
 {
     assert(m_provider);
@@ -280,7 +275,7 @@ class MediaPlayer2Player
 public:
     friend class ::MultimediaStateReceiver;
 
-    MediaPlayer2Player(IMultimediaStateProvider* provider, QObject* parent);
+    MediaPlayer2Player(IMultimediaStateProvider* provider, QObject* parent, const QString& path);
     ~MediaPlayer2Player();
 
     // properties implementation
@@ -357,8 +352,8 @@ private:
     char                            m_albumArtFile[261];
 };
 
-MediaPlayer2Player::MediaPlayer2Player(IMultimediaStateProvider* provider, QObject* parent)
-    : DBusAbstractAdaptor{ parent }
+MediaPlayer2Player::MediaPlayer2Player(IMultimediaStateProvider* provider, QObject* parent, const QString& path)
+    : DBusAbstractAdaptor{ parent, path }
     , m_provider{ provider }
 {
     assert(m_provider);
@@ -686,17 +681,17 @@ class MprisHost
     Q_OBJECT
 
 public:
-    MprisHost(IMultimediaStateProvider* provider, QObject * parent)
+    MprisHost(IMultimediaStateProvider* provider, QObject * parent, const QString& path)
         : QObject{ parent }
+        , m_path{ path }
+        , m_connection{ QDBusConnection::sessionBus() }
     {
         // we host all adaptors as children
-        m_media = new MediaPlayer2(provider, this);
-        m_media->SetDBusPath(QStringLiteral("/org/mpris/MediaPlayer2"));
-        m_player = new MediaPlayer2Player(provider, this);
-        m_player->SetDBusPath(QStringLiteral("/org/mpris/MediaPlayer2"));
+        m_media = new MediaPlayer2(provider, this, m_path);
+        m_player = new MediaPlayer2Player(provider, this, m_path);
 
         // register this root node
-        if (QDBusConnection::sessionBus().registerObject(QStringLiteral("/org/mpris/MediaPlayer2"), this, QDBusConnection::ExportAdaptors))
+        if (m_connection.registerObject(m_path, this))
         {
             spdlog::info("succeeded to register Mpris object");
         }
@@ -708,9 +703,19 @@ public:
 
     ~MprisHost()
     {
+        try
+        {
+            m_connection.unregisterObject(m_path);
+        }
+        catch(...)
+        {
+            spdlog::error("failed to unregister DBus object");
+        }
     }
 
 public:
+    const QString                   m_path;
+    QDBusConnection                 m_connection;
     MediaPlayer2*                   m_media{ nullptr };
     MediaPlayer2Player*             m_player{ nullptr };
 };
@@ -774,7 +779,7 @@ void MultimediaStateReceiver::Start() noexcept
 
             if (!m_mprisHost)
             {
-                m_mprisHost = new Mpris2::MprisHost(m_provider, m_parent);
+                m_mprisHost = new Mpris2::MprisHost(m_provider, m_parent, QString("/org/mpris/MediaPlayer2"));
             }
 
             auto t = thread([this, promiseInitializedOk = move(promiseInitializedOk)]() noexcept {

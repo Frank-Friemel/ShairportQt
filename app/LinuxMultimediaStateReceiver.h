@@ -3,8 +3,11 @@
 #include "LayerCake.h"
 #include "IMultimediaStateReceiver.h"
 
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <future>
 #include <atomic>
-#include <string>
 
 // see https://specifications.freedesktop.org/mpris/latest/
 // see https://github.com/KDE/amarok/tree/master/src/dbus/mpris2

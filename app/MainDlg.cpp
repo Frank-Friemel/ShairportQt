@@ -58,30 +58,40 @@ MainDlg::MainDlg(QApplication* app,
         
         if (m_instance->attach())
         {
-            spdlog::debug("successfully attached to instance memory: {}", instanceName);
-            const uint16_t* port = static_cast<const uint16_t*>(m_instance->constData());
+            // double attach/detach-sequence in order to release
+            // orphaned shared memory objects
+            m_instance->detach();
 
-            if (port)
+            if (m_instance->attach())
             {
-                RtpEndpoint notifier;
+                spdlog::debug("successfully attached to instance memory: {}", instanceName);
+                const uint16_t* port = static_cast<const uint16_t*>(m_instance->constData());
 
-                if (notifier.SendTo("show", 4, *port))
+                if (port)
                 {
-                    // we've notified the main instance successfully -> terminate this instance
-                    spdlog::info("successfully signaled 'show' to instance memory: {} on Port: {}", instanceName, *port);
-                    m_instance->detach();
-                    throw runtime_error("main instance notified");
+                    RtpEndpoint notifier;
+
+                    if (notifier.SendTo("show", 4, *port))
+                    {
+                        // we've notified the main instance successfully -> terminate this instance
+                        spdlog::info("successfully signaled 'show' to instance memory: {} on Port: {}", instanceName, *port);
+                        m_instance->detach();
+                        throw runtime_error("main instance notified");
+                    }
+                    else
+                    {
+                        spdlog::error("failed to send 'show'");
+                    }
                 }
                 else
                 {
-                    spdlog::error("failed to send 'show'");
+                    spdlog::error("failed to get memory-data");
+                }
+                if (!m_instance->detach())
+                {
+                    assert(false);
                 }
             }
-            else
-            {
-                spdlog::error("failed to get memory-data");
-            }
-            m_instance->detach();
         }
         if (m_instance->create(sizeof(uint16_t)))
         {
