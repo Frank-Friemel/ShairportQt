@@ -11,6 +11,7 @@
 #include <QSlider>
 #include <QComboBox>
 #include <QUrl>
+#include <QBuffer>
 
 #include "localization/StringIDs.h"
 #include <spdlog/spdlog.h>
@@ -32,7 +33,10 @@ using namespace literals;
 using namespace WinToastLib;
 #endif
 
-MainDlg::MainDlg(QApplication* app, const SharedPtr<IValueCollection>& config, const std::string& configName)
+MainDlg::MainDlg(QApplication* app,
+    const SharedPtr<IValueCollection>& config,
+    const std::string& configName,
+    shared_ptr<IMultimediaStateReceiver>&& multimediaStateReceiver)
     : m_app{ app }
     , m_config{ config }
     , m_strConfigName{ configName }
@@ -41,8 +45,10 @@ MainDlg::MainDlg(QApplication* app, const SharedPtr<IValueCollection>& config, c
     , m_iconPlay{ ":/play.png" }
     , m_iconPause{ ":/pause.png" }
     , m_handleKeyboardHook{ KeyboardHook::Setup(this) }
+    , m_multimediaStateReceiver { std::move(multimediaStateReceiver) }
 {
     assert(m_app);
+    assert(m_multimediaStateReceiver);
 
     if (VariantValue::Key("GlobalInstanceHandler").TryGet<bool>(config).value_or(true))
     {
@@ -52,30 +58,40 @@ MainDlg::MainDlg(QApplication* app, const SharedPtr<IValueCollection>& config, c
         
         if (m_instance->attach())
         {
-            spdlog::debug("successfully attached to instance memory: {}", instanceName);
-            const uint16_t* port = static_cast<const uint16_t*>(m_instance->constData());
+            // double attach/detach-sequence in order to release
+            // orphaned shared memory objects
+            m_instance->detach();
 
-            if (port)
+            if (m_instance->attach())
             {
-                RtpEndpoint notifier;
+                spdlog::debug("successfully attached to instance memory: {}", instanceName);
+                const uint16_t* port = static_cast<const uint16_t*>(m_instance->constData());
 
-                if (notifier.SendTo("show", 4, *port))
+                if (port)
                 {
-                    // we've notified the main instance successfully -> terminate this instance
-                    spdlog::info("successfully signaled 'show' to instance memory: {} on Port: {}", instanceName, *port);
-                    m_instance->detach();
-                    throw runtime_error("main instance notified");
+                    RtpEndpoint notifier;
+
+                    if (notifier.SendTo("show", 4, *port))
+                    {
+                        // we've notified the main instance successfully -> terminate this instance
+                        spdlog::info("successfully signaled 'show' to instance memory: {} on Port: {}", instanceName, *port);
+                        m_instance->detach();
+                        throw runtime_error("main instance notified");
+                    }
+                    else
+                    {
+                        spdlog::error("failed to send 'show'");
+                    }
                 }
                 else
                 {
-                    spdlog::error("failed to send 'show'");
+                    spdlog::error("failed to get memory-data");
+                }
+                if (!m_instance->detach())
+                {
+                    assert(false);
                 }
             }
-            else
-            {
-                spdlog::error("failed to get memory-data");
-            }
-            m_instance->detach();
         }
         if (m_instance->create(sizeof(uint16_t)))
         {
@@ -109,6 +125,8 @@ MainDlg::MainDlg(QApplication* app, const SharedPtr<IValueCollection>& config, c
         painter.end();
         m_pixmapShairport = QPixmap::fromImage(surface);
     }
+    m_currentVolume = VariantValue::Key("Volume").Get<int64_t>(m_config);
+
     // create signal/slot connections
     connect(this, &MainDlg::ShowMessage, this, &MainDlg::OnShowMessage);
     connect(this, &MainDlg::UpdateMMState, this, &MainDlg::OnUpdateMMState);
@@ -122,6 +140,7 @@ MainDlg::MainDlg(QApplication* app, const SharedPtr<IValueCollection>& config, c
     connect(this, &MainDlg::ShowToastMessage, this, &MainDlg::OnShowToastMessage);
     connect(this, &MainDlg::ActivateWindow, this, &MainDlg::OnActivateWindow);
     connect(this, &MainDlg::HideWindow, this, &MainDlg::OnHideWindow);
+    connect(this, &MainDlg::Quit, this, &MainDlg::OnQuit);
 
     setWindowIcon(QIcon(":/ShairportQt.png"));
     setWindowTitle(tr("Shairport"));
@@ -355,6 +374,19 @@ void MainDlg::RunScheduler() noexcept
                 }
                 assert(!sync.owns_lock());
 
+                // volume changes?
+                // check only, if no volume adjustments are ongoing
+                if (m_threadSetVolume.threads() == 0)
+                {
+                    const int64_t currentVolume = VariantValue::Key("Volume").Get<int64_t>(m_config);
+
+                    if (m_currentVolume != currentVolume)
+                    {
+                        m_currentVolume = currentVolume;
+                        m_multimediaStateReceiver->OnUpdateVolume(pow(10.0, currentVolume * 0.00005));
+                    }
+                }
+
                 // any toast message pending?
                 if (m_timePointShowToastMessage)
                 {
@@ -396,12 +428,14 @@ void MainDlg::CreateMenuBar()
     QPointer<QMenu> fileMenu = new QMenu(GetString(StringID::MENU_FILE), this);
 
     const auto strQuit = GetString(StringID::MENU_QUIT);
+    const auto strMinimize = GetString(StringID::MENU_MINIMIZE);
 
 #ifdef Q_OS_WIN
     const QKeySequence quitShortcutSequence(QKeySequence::StandardKey::Close);
 #else
     const QKeySequence quitShortcutSequence(QKeySequence::StandardKey::Quit);
 #endif
+    fileMenu->addAction(QIcon(":/minimize-16.ico"), strMinimize, this, &MainDlg::Minimize);
     fileMenu->addAction(QIcon(":/exit-16.ico"), strQuit, this, &MainDlg::OnQuit, quitShortcutSequence);
 
     QPointer<QMenu> editMenu = new QMenu(GetString(StringID::MENU_EDIT), this);
@@ -420,7 +454,17 @@ void MainDlg::WidgetCreateStatusGroup()
     QPointer<QHBoxLayout> layout = new QHBoxLayout;
 
     m_labelStatus = new QLabel;
-    layout->addWidget(m_labelStatus);
+    layout->addWidget(m_labelStatus, 2);
+
+    m_buttonMinimize = new QPushButton(QIcon(":/minimize.png"), tr(""));
+    m_buttonMinimize->setFlat(true);
+    m_buttonMinimize->setStyleSheet("QPushButton { background-color: transparent; border: 0px }"
+        "QPushButton:hover { background-color: rgba(192, 192, 192, 0.2) }");
+    m_buttonMinimize->setToolTip(GetString(StringID::LABEL_MINIMIZE));
+
+    connect(m_buttonMinimize, &QPushButton::clicked, [this]() { Minimize(); });
+
+    layout->addWidget(m_buttonMinimize);
 
     m_groupBoxStatus = new QGroupBox;
     m_groupBoxStatus->setSizePolicy(QSizePolicy::Policy::Expanding, QSizePolicy::Policy::Fixed);
@@ -663,8 +707,8 @@ void MainDlg::ConfigureSystemTray()
 #ifdef Q_OS_WIN
             if (WinToast::isCompatible() && VariantValue::Key("UseWinToast").TryGet<bool>(m_config).value_or(true))
             {
-                WinToast::instance()->setAppName(L"ShairportQT");
-                WinToast::instance()->setAppUserModelId(WinToast::configureAUMI(L"Shairport"s, L"ShairportQT"s, L"Audio"s, L"1.0"s));
+                WinToast::instance()->setAppName(L"Shairport");
+                WinToast::instance()->setAppUserModelId(WinToast::configureAUMI(L"Airplay"s, L"Shairport"s, L"Audio"s, L"1.0"s));
                 
                 if (!WinToast::instance()->initialize())
                 {
@@ -772,7 +816,7 @@ void MainDlg::ConfigureDacpBrowser()
 
         if (!dacpBrowser->Succeeded())
         {
-            spdlog::error("Main Dialog: failed to start DACP Browser with code: ", m_dacpBrowser->ErrorCode());
+            spdlog::error("Main Dialog: failed to start DACP Browser with code: ", dacpBrowser->ErrorCode());
 
             if (!m_isHidden)
             {
@@ -932,28 +976,28 @@ void MainDlg::SendDacpCommand(const string& cmd)
 // Callback sent by RAOP service: "service created"
 void MainDlg::OnCreateRaopService(bool success) noexcept
 {
-    if (!success)
+    try
     {
-        // inform the user that we've failed to create the service
-        spdlog::debug("Main Dialog: emitting RAOP Service check ShowMessage");
-
-        if (!m_dialogClosed)
+        if (!success)
         {
-            try
+            // inform the user that we've failed to create the service
+            spdlog::debug("Main Dialog: emitting RAOP Service check ShowMessage");
+
+            if (!m_dialogClosed)
             {
                 emit ShowMessage(StringID::TROUBLE_SHOOT_RAOP_SERVICE);
             }
-            catch (const exception& e)
-            {
-                spdlog::error("failed to emit TROUBLE_SHOOT_RAOP_SERVICE: ", e.what());
-            }
         }
+        else
+        {
+            ShowStatus(GetString(StringID::STATUS_READY));
+        }
+        spdlog::debug("Main Dialog: RAOP Service created: {}", success);
     }
-    else
+    catch (const exception& e)
     {
-        ShowStatus(GetString(StringID::STATUS_READY));
+        spdlog::error("failed show status: ", e.what());
     }
-    spdlog::debug("Main Dialog: RAOP Service created: {}", success);
 }
 
 // Callback sent by RAOP service: DMAP info arrived
@@ -1243,6 +1287,8 @@ void MainDlg::OnUpdateMMState()
     m_buttonVolumeDown->setEnabled(enabled);
     m_buttonVolumeUp->setEnabled(enabled);
     m_buttonPlayPauseTrack->setEnabled(enabled);
+
+    m_multimediaStateReceiver->OnUpdateMMState(enabled);
 }
 
 void MainDlg::OnPlayState(bool isPlaying)
@@ -1267,6 +1313,7 @@ void MainDlg::OnPlayState(bool isPlaying)
     }
     if (wasPlaying != isPlaying)
     {
+        m_multimediaStateReceiver->OnUpdatePlayState(isPlaying);
         OnUpdateTray();
     }
 }
@@ -1293,7 +1340,6 @@ void MainDlg::OnDmapInfo(QString album, QString track, QString artist)
 
 void MainDlg::OnUpdateTray()
 {
-    if (m_systemTray && QSystemTrayIcon::supportsMessages() && VariantValue::Key("TrayTrackInfo").TryGet<bool>(m_config).value_or(false))
     {
         const lock_guard<recursive_mutex> guard(m_mtxTitleInfo);
 
@@ -1310,14 +1356,17 @@ void MainDlg::OnUpdateTray()
                     // wait 1000ms to be sure the album art has arrived as well
                     m_timePointShowToastMessage = make_unique<TimePoint>(chrono::steady_clock::now() + 1000ms);
                 }
-                QString toolTip = tr("ShairportQt - ") + m_strCurrentArtistInTray + tr(" - ") + m_strCurrentTrack;
-
-                if (toolTip.length() > 100)
+                if (m_systemTray && QSystemTrayIcon::supportsMessages() && VariantValue::Key("TrayTrackInfo").TryGet<bool>(m_config).value_or(false))
                 {
-                    // shorten the tooltip if it's too long
-                    toolTip = toolTip.left(97) + tr("...");
+                    QString toolTip = tr("ShairportQt - ") + m_strCurrentArtistInTray + tr(" - ") + m_strCurrentTrack;
+
+                    if (toolTip.length() > 100)
+                    {
+                        // shorten the tooltip if it's too long
+                        toolTip = toolTip.left(97) + tr("...");
+                    }
+                    m_systemTray->setToolTip(toolTip);
                 }
-                m_systemTray->setToolTip(toolTip);
             }
         }
         else
@@ -1329,6 +1378,7 @@ void MainDlg::OnUpdateTray()
             m_systemTray->setToolTip(tr("ShairportQt"));
         }
     }
+    m_multimediaStateReceiver->OnUpdateTrackInfo();
 }
 
 // Widget slot: ShowToastMessage
@@ -1379,7 +1429,7 @@ void MainDlg::OnShowToastMessage()
                                 try
                                 {
                                     m_pathImageFile = buf;
-                                    m_pathImageFile += ("ShairportQT_TempImage_"s +
+                                    m_pathImageFile += ("ShairportQt_TempAlbumArt_"s +
                                             to_string(++fileImagePostFix) +
                                             ".png"s);
                                     DeleteFileA(m_pathImageFile.c_str());
@@ -1472,6 +1522,7 @@ void MainDlg::OnShowToastMessage()
 #endif            
         }
     }
+    m_multimediaStateReceiver->OnUpdateTrackInfo();
 }
 
 // Widget slot: state of CheckBox "Title Info" changed
@@ -1509,13 +1560,16 @@ void MainDlg::OnSettingTitleInfoView(Qt::CheckState state)
 // Widget slot: ShowAdArt
 void MainDlg::OnShowAdArt()
 {
-    const lock_guard<recursive_mutex> guard(m_mtxTitleInfo);
-
-    if (m_imageAlbumArt)
     {
-        m_imageAlbumArt->setPixmap(m_pixmapShairport);
-        m_currentAlbumArt.reset();
+        const lock_guard<recursive_mutex> guard(m_mtxTitleInfo);
+
+        if (m_imageAlbumArt)
+        {
+            m_imageAlbumArt->setPixmap(m_pixmapShairport);
+            m_currentAlbumArt.reset();
+        }
     }
+    m_multimediaStateReceiver->OnUpdateTrackInfo();
 }
 
 // Widget slot: show album art
@@ -1581,6 +1635,7 @@ void MainDlg::OnAlbumArt()
     {
         spdlog::error("failed to setPixmap: {}", e.what());
     }
+    m_multimediaStateReceiver->OnUpdateTrackInfo();
 }
 
 // Widget slot: UpdateWidgets
@@ -1644,7 +1699,27 @@ void MainDlg::OnProgressInfo(int currentSeconds, int totalSeconds, QString conne
 
     if (connectedClient.isEmpty())
     {
-        m_labelStatus->setText(GetString(StringID::STATUS_READY));
+        shared_ptr<RaopServer> raopServer;
+        {
+            const lock_guard<mutex> guard(m_mtx);
+            raopServer = m_raopServer;
+        }
+        if (raopServer && raopServer->GetErrorCode() == ERROR_SUCCESS)
+        {
+            m_labelStatus->setText(GetString(StringID::STATUS_READY));
+        }
+        else
+        {
+            if (!raopServer)
+            {
+                m_labelStatus->setText(QString::fromStdWString(L"..."s));
+            }
+            else
+            {
+                m_labelStatus->setText(
+                    QString::fromStdWString(ErrorToString(raopServer->GetErrorCode())));
+            }
+        }
     }
     else
     {
@@ -1738,6 +1813,10 @@ void MainDlg::closeEvent(QCloseEvent* event)
         // remove all collected DACP infos
         mapDacpService.clear();
 
+        // cleanup MultimediaStateReceiver
+        m_multimediaStateReceiver->Cleanup();
+        m_threadSetVolume.clear();
+
         try
         {
             m_instanceEndpoint.reset();
@@ -1787,30 +1866,43 @@ void MainDlg::showEvent(QShowEvent* event)
 
     if (firstShowEvent)
     {
+        // initialize System Integrated Multimedia Control
+        m_multimediaStateReceiver->Initialize(this, this, reinterpret_cast<NativeWindowHandle>(this->winId()));
+
         m_firstShowEvent = false;
     
         if (VariantValue::Key("StartMinimized").TryGet<bool>(m_config).value_or(false))
         {
             spdlog::info("start minimized");
-            setWindowState(Qt::WindowMinimized);
-
-            // only hide Window, if we do have a tray icon
-            // otherwise we won't be able to restore the Window again
-            if (QSystemTrayIcon::isSystemTrayAvailable() &&
-                VariantValue::Key("TrayIcon").TryGet<bool>(m_config).value_or(true))
-            {
-                auto asyncHideWindow = async(launch::async, [this]() -> void
-                {
-                    this_thread::sleep_for(100ms);
-                    HideWindow();
-                });
-                const lock_guard<mutex> guard(m_mtx);
-                m_listAsyncOperations.emplace_back(std::move(asyncHideWindow));
-            }
+            Minimize();
         }
     }
     emit UpdateWidgets();
     QWidget::showEvent(event);
+}
+
+void MainDlg::Minimize()
+{
+    setWindowState(Qt::WindowMinimized);
+
+    // only hide Window, if we do have a tray icon (or MPRIS on Linux)
+    // otherwise we won't be able to restore the Window again
+    if (QSystemTrayIcon::isSystemTrayAvailable() &&
+            (VariantValue::Key("TrayIcon").TryGet<bool>(m_config).value_or(true)
+ #ifdef Q_OS_UNIX
+             || VariantValue::Key("SystemIntegratedMultimediaControl").TryGet<bool>(m_config).value_or(true)
+ #endif
+            )
+       )
+    {
+        auto asyncHideWindow = async(launch::async, [this]() -> void
+        {
+            this_thread::sleep_for(100ms);
+            HideWindow();
+        });
+        const lock_guard<mutex> guard(m_mtx);
+        m_listAsyncOperations.emplace_back(std::move(asyncHideWindow));
+    }
 }
 
 // Widget override: Window is collapsing
@@ -1905,6 +1997,193 @@ void MainDlg::OnKeyPressed(KeyboardHook::Key key) noexcept
     }
 }
 
+bool MainDlg::GetServiceName(std::string& name, std::string& subName) const noexcept
+{
+    try
+    {
+        name    = "Shairport"s;
+        subName = EncodeToHex(VariantValue::Key("HWaddress").Get<vector<uint8_t>>(m_config));
+        return true;
+    }
+    catch(...)
+    {
+    }
+    return false;
+}
+
+void MainDlg::GetDesktopEntry(std::string& entry) const noexcept
+{
+    try
+    {
+        entry = "org.shairport.ShairportQt"s;
+    }
+    catch(...)
+    {
+    }
+}
+
+void MainDlg::PlayPause() noexcept 
+{
+    try
+    {
+        SendDacpCommand("playpause"s);
+    }
+    catch(...)
+    {
+    }
+}
+
+void MainDlg::SkipNext() noexcept
+{
+    try
+    {
+        SendDacpCommand("nextitem"s);
+    }
+    catch(...)
+    {
+    }
+}
+
+void MainDlg::SkipPrevious() noexcept
+{
+    try
+    {
+        SendDacpCommand("previtem"s);
+    }
+    catch(...)
+    {
+    }
+}
+
+double MainDlg::GetVolume() const noexcept
+{
+    const double lfVolume = pow(10.0, VariantValue::Key("Volume").Get<int64_t>(m_config) * 0.00005);
+    assert(lfVolume > 0. && lfVolume <= 1.);
+    return lfVolume;
+}
+
+void MainDlg::SetVolume(double v) noexcept
+{
+    try
+    {
+        m_threadSetVolume.emplace_back([this, targetVolume = v]() 
+        {
+            const ScopeContext determineCurrentVolume([this]() {
+                m_currentVolume = VariantValue::Key("Volume").Get<int64_t>(m_config);
+            });
+
+            double currentVolume = pow(10.0, VariantValue::Key("Volume").Get<int64_t>(m_config) * 0.00005);
+
+            if (targetVolume > currentVolume)
+            {
+                do
+                {
+                    SendDacpCommand("volumeup"s);
+                    
+                    int tries = 0;
+                    while (currentVolume == pow(10.0, VariantValue::Key("Volume").Get<int64_t>(m_config) * 0.00005))
+                    {
+                        // if the volume didn't change -> we wait here
+                        this_thread::sleep_for(10ms);
+
+                        if (tries++ > 20)
+                        {
+                            return;
+                        }
+                    }
+                    currentVolume = pow(10.0, VariantValue::Key("Volume").Get<int64_t>(m_config) * 0.00005);
+                } 
+                while (targetVolume > currentVolume);
+            }
+            else if (targetVolume < currentVolume)
+            {
+                do
+                {
+                    SendDacpCommand("volumedown"s);
+
+                    int tries = 0;
+                    while (currentVolume == pow(10.0, VariantValue::Key("Volume").Get<int64_t>(m_config) * 0.00005))
+                    {
+                        // if the volume didn't change -> we wait here
+                        this_thread::sleep_for(10ms);
+
+                        if (tries++ > 20)
+                        {
+                            return;
+                        }
+                    }
+                    currentVolume = pow(10.0, VariantValue::Key("Volume").Get<int64_t>(m_config) * 0.00005);
+                } 
+                while (targetVolume < currentVolume);
+            }
+        });
+    }
+    catch (const exception& e)
+    {
+        spdlog::error("failed to set volume: {}", e.what());
+    }
+}
+
+bool MainDlg::GetTrackInfo(wstring& track, wstring& album, wstring& artist, vector<unsigned char>& art) noexcept
+{
+    try
+    {
+        const lock_guard<recursive_mutex> guard(m_mtxTitleInfo);
+        track = m_strCurrentTrackInTray.toStdWString();
+        album = m_strCurrentAlbum.toStdWString();
+        artist = m_strCurrentArtistInTray.toStdWString();
+
+        if (track.empty() && !m_strCurrentTrack.isEmpty())
+        {
+            track = m_strCurrentTrack.toStdWString();
+        }
+        if (artist.empty() && !m_strCurrentArtist.isEmpty())
+        {
+            artist = m_strCurrentArtist.toStdWString();
+        }
+        const QPixmap& pixmap = m_currentAlbumArt ? *m_currentAlbumArt : m_pixmapShairport;
+
+        QByteArray array;
+        QBuffer buffer(&array);
+        
+        if (buffer.open(QIODevice::WriteOnly))
+        {
+            if (pixmap.save(&buffer, "PNG", 100))
+            {
+                art.resize(array.size());
+                memcpy(art.data(), array.data(), art.size());
+            }
+        }
+        return true;
+    }
+    catch(...)
+    {
+    }
+    return false;
+}
+
+void MainDlg::ShowWindow() noexcept
+{
+    try
+    {
+        ActivateWindow();
+    }
+    catch(...)
+    {
+    }
+}
+
+void MainDlg::QuitApp() noexcept
+{
+    try
+    {
+        Quit();
+    }
+    catch(...)
+    {
+    }
+}
+
 // Widget slot: show about dialog
 void MainDlg::OnAbout()
 {
@@ -1925,7 +2204,7 @@ void MainDlg::OnAbout()
     labelPixmap->setPixmap(pixmap.scaled(64, 64));
 
     // search for regular expression "1[., ]+0[., ]+0[., ]+\d"
-    QPointer<QLabel> versionLabel = new QLabel(tr("<p><a href=\"https://github.com/Frank-Friemel/ShairportQt\">ShairportQt</a> 1.0.0.4</p>"));
+    QPointer<QLabel> versionLabel = new QLabel(tr("<p><a href=\"https://github.com/Frank-Friemel/ShairportQt\">ShairportQt</a> 1.0.0.5</p>"));
 
     dlg->connect(versionLabel, &QLabel::linkActivated, [](QString link)
         {
@@ -2168,6 +2447,7 @@ void MainDlg::OnOptions()
     const auto audioDevice      = VariantValue::Key("AudioDevice").TryGet<string>(m_config).value_or("default"s);
     const auto logToFile        = VariantValue::Key("DebugLogFile").TryGet<bool>(m_config).value_or(false);
     const auto noMediaControl   = VariantValue::Key("NoMediaControl").TryGet<bool>(m_config).value_or(false);
+    const auto sysMediaControl  = VariantValue::Key("SystemIntegratedMultimediaControl").TryGet<bool>(m_config).value_or(true);
 
     QPointer<QDialog> dlg = new QDialog(this);
 
@@ -2245,6 +2525,9 @@ void MainDlg::OnOptions()
 
     QPointer<QCheckBox> mediaControlOption = new QCheckBox(GetString(StringID::LABEL_DISABLE_MM_CONTROL));
     mediaControlOption->setCheckState(noMediaControl ? Qt::CheckState::Checked : Qt::CheckState::Unchecked);
+    
+    QPointer<QCheckBox> sysMMControlOption = new QCheckBox(GetString(StringID::LABEL_ENABLE_SYS_MM_CONTROL));
+    sysMMControlOption->setCheckState(sysMediaControl ? Qt::CheckState::Checked : Qt::CheckState::Unchecked);
 
     QPointer<QVBoxLayout> mainLayout = new QVBoxLayout(dlg);
 
@@ -2252,6 +2535,7 @@ void MainDlg::OnOptions()
     mainLayout->addWidget(soundDeviceGroup);
     mainLayout->addWidget(logToFileOption);
     mainLayout->addWidget(mediaControlOption);
+    mainLayout->addWidget(sysMMControlOption);    
     mainLayout->addWidget(buttonBox);
 
     dlg->setLayout(mainLayout);
@@ -2262,11 +2546,24 @@ void MainDlg::OnOptions()
         const string newAudioDevice     = soundDeviceDropList->currentData().toString().toStdString();
         const bool newLogToFile         = logToFileOption->checkState() == Qt::CheckState::Checked;
         const bool newNoMediaControl    = mediaControlOption->checkState() == Qt::CheckState::Checked;
+        const bool newSysMediaControl   = sysMMControlOption->checkState() == Qt::CheckState::Checked;
 
         if (newNoMediaControl != noMediaControl)
         {
             VariantValue::Key("NoMediaControl").Set(m_config, newNoMediaControl);
             ConfigureDacpBrowser();
+        }
+        if (newSysMediaControl != sysMediaControl)
+        {
+            VariantValue::Key("SystemIntegratedMultimediaControl").Set(m_config, newSysMediaControl);
+            m_multimediaStateReceiver->Configure(newSysMediaControl);
+
+            if (newSysMediaControl)
+            {
+                UpdateMMState();
+                m_multimediaStateReceiver->OnUpdatePlayState(m_isPlaying);
+                m_multimediaStateReceiver->OnUpdateTrackInfo();
+            }
         }
         if (newLogToFile != logToFile)
         {

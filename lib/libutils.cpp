@@ -9,17 +9,15 @@
 #include "Trim.h"
 #include <string.h>
 #include <codecvt>
+#include <cassert>
 
 using namespace std;
 using namespace literals;
 
-ScopeContext::ScopeContext(const function<void()>& scopeCleanup)
-	: m_scopeCleanup(scopeCleanup)
+ScopeContext::ScopeContext(std::function<void()>&& scopeCleanup) noexcept
+	: m_scopeCleanup(move(scopeCleanup))
 {
-	if (!m_scopeCleanup)
-	{
-		throw invalid_argument("scopeCleanup");
-	}
+	assert(m_scopeCleanup);
 }
 
 ScopeContext::~ScopeContext()

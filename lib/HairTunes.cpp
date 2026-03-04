@@ -315,6 +315,7 @@ void HairTunes::RunQueue() noexcept
     // start fill in [ms]
     const size_t msStartFill = VariantValue::Key("StartFill").Get<size_t>(m_config);
     const auto audioDevice = VariantValue::Key("AudioDevice").TryGet<string>(m_config).value_or("default"s);
+    const size_t minBufferFill = (msStartFill * m_samplingRate * SAMPLE_FACTOR) / 1000;
 
     spdlog::debug("starting Hairtunes with a buffer of {} ms and output to \"{}\"", msStartFill, audioDevice);
 
@@ -467,6 +468,18 @@ void HairTunes::RunQueue() noexcept
                         if (!m_isPlaying)
                         {
                             m_isPlaying = true;
+
+                            const size_t sizeStreamPCM = streamPCM->GetSize();
+
+                            if (!m_stopThread && !m_flush && (sizeStreamPCM < minBufferFill))
+                            {
+                                m_pendingData = sizeStreamPCM;
+
+                                // wait until min data has arrived
+                                PutPacketToPool(move(packet));
+                                sync.lock();
+                                break;
+                            }
                         }
                     }
                     else if (m_isPlaying)
@@ -486,7 +499,7 @@ void HairTunes::RunQueue() noexcept
 
                 // wait for PCM buffer to fill [ms] before we start playing
                 if (!playAudio.valid() && 
-                    ((sizeStreamPCM > ((msStartFill * m_samplingRate * SAMPLE_FACTOR) / 1000)) || m_stopThread))
+                    ((sizeStreamPCM > minBufferFill) || m_stopThread))
                 {
                     // start playing after the sound buffer had been filled
                     playAudio = AlsaAudio::Play(streamPCM, audioDevice);
@@ -551,7 +564,7 @@ void HairTunes::RequestResend(const USHORT nSeq, const short nCount) noexcept
     }
 }
 
-void HairTunes::Flush(unsigned int seq /*= 0*/)
+void HairTunes::Flush(unsigned int seq /*= 0*/) noexcept
 {
     unique_lock<mutex> sync(m_mtxQueue);
 

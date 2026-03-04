@@ -32,6 +32,9 @@
 #include "dnssd.h"
 #include "DacpService.h"
 #include "KeyboardHook.h"
+#include "IMultimediaStateReceiver.h"
+#include "IMultimediaStateProvider.h"
+#include "ThreadPool.h"
 
 class TimeLabel;
 
@@ -44,11 +47,15 @@ class MainDlg
     , public IDnsSDEvents
     , protected KeyboardHook::ICallback
     , public IRtpRequestHandler
+    , protected IMultimediaStateProvider
 {
     Q_OBJECT
 
 public:
-    MainDlg(QApplication* app, const SharedPtr<IValueCollection>& config, const std::string& configName);
+    MainDlg(QApplication* app,
+        const SharedPtr<IValueCollection>& config,
+        const std::string& configName,
+        std::shared_ptr<IMultimediaStateReceiver>&& multimediaStateReceiver);
     ~MainDlg();
 
 private:
@@ -64,6 +71,8 @@ private:
     void ConfigureSystemTray();
     void SendDacpCommand(const std::string& cmd);
 
+    void Minimize();
+    
     QString GetString(int id) const;
     std::string GetAutoStartConfig() const;
 
@@ -95,6 +104,18 @@ protected:
     // IRtpRequestHandler implementation
     void OnRequest(RtpEndpoint*, std::unique_ptr<RtpPacket>&& packet) override;
 
+    // IMultimediaStateProvider implementation
+    bool GetServiceName(std::string& name, std::string& subName) const noexcept override;
+    void GetDesktopEntry(std::string& entry) const noexcept override;
+    void PlayPause() noexcept override;
+    void SkipNext() noexcept override;
+    void SkipPrevious() noexcept override;
+    double GetVolume() const noexcept override;
+    void SetVolume(double v) noexcept override;
+    bool GetTrackInfo(std::wstring& track, std::wstring& album, std::wstring& artist, std::vector<unsigned char>& art) noexcept override;
+    void ShowWindow() noexcept override;
+    void QuitApp() noexcept override;
+
 signals:
     void ShowMessage(int text) const;
     void UpdateMMState() const;
@@ -108,6 +129,7 @@ signals:
     void ShowToastMessage();
     void ActivateWindow();
     void HideWindow();
+    void Quit();
 
 private slots:
     void OnQuit();
@@ -172,7 +194,8 @@ private:
     // Status Group
     QPointer<QGroupBox>                 m_groupBoxStatus;
     QPointer<QLabel>                    m_labelStatus;
-    
+    QPointer<QPushButton>               m_buttonMinimize;
+
     // Airport Group
     QPointer<QGroupBox>                 m_groupBoxAirport;
     QPointer<QPushButton>               m_buttonChangeAirport;
@@ -225,4 +248,9 @@ private:
     // global instance handling
     QPointer<QSharedMemory>             m_instance;
     std::unique_ptr<RtpEndpoint>        m_instanceEndpoint;
+
+    // Multimedia State Receiver
+    const std::shared_ptr<IMultimediaStateReceiver> m_multimediaStateReceiver;
+    std::atomic_int64_t                 m_currentVolume{ 0 };
+    ThreadPool                          m_threadSetVolume;
 };

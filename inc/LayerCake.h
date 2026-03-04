@@ -137,6 +137,8 @@ bool GetComputerNameA(char* lpBuffer, uint32_t* nSize);
 bool DeleteFileA(const char* lpFileName);
 bool MoveFileA(const char* lpExistingFileName, const char* lpNewFileName);
 
+int GetTempPathA(int size, char* buf);
+
 #else
 
 std::wstring CA2WEX(const std::string& input, unsigned int cp = CP_UTF8);

@@ -68,6 +68,8 @@ public:
 
 	SharedPtr<IValueCollection> GetClient(const std::string& remoteAddr);
 
+	uint32_t GetErrorCode() const noexcept;
+	
 protected:
 	// Dmap Parser Callbacks
 	void on_string(void* ctx, const char* code, const char* name, const char* buf, size_t len) override;
@@ -93,4 +95,5 @@ private:
 	IRaopEvents* const						m_raopEvents;
 	int										m_duration{ 0 }; // total duration time [s]
 	int										m_position{ 0 }; // current play position time [s]
+	std::atomic_uint32_t					m_errorState{ 0 };
 };

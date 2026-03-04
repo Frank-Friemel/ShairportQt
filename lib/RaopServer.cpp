@@ -83,6 +83,11 @@ SharedPtr<IValueCollection> RaopServer::GetClient(const std::string& remoteAddr)
 	return GetClient(remoteAddr, false);
 }
 
+uint32_t RaopServer::GetErrorCode() const noexcept
+{
+	return m_errorState;
+}
+
 SharedPtr<IValueCollection> RaopServer::GetClient(const string& remoteAddr, bool create)
 {
 	// try to get client from the client-collection by remote address
@@ -156,14 +161,16 @@ bool RaopServer::EnableServer(bool enable) noexcept
 
 void RaopServer::Run() noexcept
 {
+	mutex browseMutex;
+	bool browseStop = false;
+	condition_variable browseCondition;
+	thread browseThread;
+	
 	try
 	{
-		mutex browseMutex;
-		bool browseStop = false;
 		bool browseForce = false;
-		condition_variable browseCondition;
-		thread browseThread([&]() noexcept {
-
+	
+		browseThread = thread([&]() noexcept {
 			unique_lock<mutex> guard{ browseMutex };
 
 			while(!browseStop)
@@ -218,12 +225,12 @@ void RaopServer::Run() noexcept
 								try
 								{
 									Service s{ interfaceIndex, serviceName, regtype, replyDomain };
-
+#if 0
 									spdlog::debug("{} raop service {} with type {}", 
 										registered ? "registered"s : "unregistered"s, 
 										s.m_serviceName, 
 										s.m_regtype);
-
+#endif
 									if (registered)
 									{
 										auto h = m_dnsSD->ResolveService(s.m_interfaceIndex, s.m_serviceName, s.m_regtype, s.m_replyDomain, this);
@@ -253,6 +260,7 @@ void RaopServer::Run() noexcept
 								const char*,
 								uint16_t port) noexcept override
 							{
+#if 0								
 								try
 								{
 									string hostName = hosttarget ? hosttarget : ""s;
@@ -264,6 +272,7 @@ void RaopServer::Run() noexcept
 								catch(...)
 								{
 								}
+#endif
 							}
 					} browseEvents{ m_dnsSD };
 					const auto handle = m_dnsSD->BrowseForService("_raop._tcp", &browseEvents);
@@ -807,6 +816,7 @@ void RaopServer::Run() noexcept
 			port += 10;
 		}
 #endif
+
 		// try several ports until we find one to listen to
 		for (; port <= 6000; ++port)
 		{
@@ -844,6 +854,14 @@ void RaopServer::Run() noexcept
 					}
 					const bool bSuccess = dnsSDHandle->Succeeded();
 
+					if (!bSuccess)
+					{
+						m_errorState = GetLastError();
+					}
+					else
+					{
+						m_errorState = ERROR_SUCCESS;
+					}
 					if (m_raopEvents)
 					{
 						// notify the event sink
@@ -878,19 +896,30 @@ void RaopServer::Run() noexcept
 			break;
 		}
 		spdlog::info("Stopped RaopServer");
+	}
+	catch(const exception& e)
+	{
+		spdlog::error("Failed to start RaopServer: {}", e.what());
 
+		if (m_raopEvents)
+		{
+			m_errorState = GetLastError();
+			// notify the event sink
+			m_raopEvents->OnCreateRaopService(false);
+		}
+	}
+
+	if (browseThread.joinable())
+	{
 		{
 			const lock_guard<mutex> guard{ browseMutex };
 			browseStop = true;
 			browseCondition.notify_all();
 		}
 		browseThread.join();
-		spdlog::info("Stopped Raop Browser");
 	}
-	catch(...)
-	{
-		spdlog::error("Failed to start RaopServer");
-	}
+	spdlog::info("Stopped Raop Browser");
+
 	unique_ptr<HairTunes> decoder;
 
 	if (m_decoder)

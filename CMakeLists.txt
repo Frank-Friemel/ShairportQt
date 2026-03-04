@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.15.0)
-project(ShairportQt VERSION 1.0.0.4 LANGUAGES CXX)
+project(ShairportQt VERSION 1.0.0.5 LANGUAGES CXX)
 
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # locate packages
@@ -55,10 +55,21 @@ set(LOCALIZATION_SOURCES    app/localization/LanguageManager.cpp
                             app/localization/Spanish.cpp
                             app/localization/Catalan.cpp)
 
+if (UNIX)
+
+set(SYSTEM_NATIVE_APP_SOURCES app/LinuxMultimediaStateReceiver.cpp)
+
+else()
+
+set(SYSTEM_NATIVE_APP_SOURCES app/WindowsMultimediaStateReceiver.cpp)
+
+endif()
+
 set(APP_SOURCES app/main.cpp
                 app/MainDlg.cpp
                 app/DacpService.cpp
                 app/TimeLabel.cpp
+                ${SYSTEM_NATIVE_APP_SOURCES}
                 ${LOCALIZATION_SOURCES})
 
 set(APP_RESOURCE res/resource.qrc)
@@ -82,6 +93,7 @@ if (MSVC)
 else()
     # dismiss several warnings
     target_compile_options(ShairportQt PRIVATE -Wno-deprecated-declarations -Wnarrowing)
+    set_target_properties(ShairportQt PROPERTIES AUTOMOC TRUE)
 endif()
 
 target_link_libraries(ShairportQt PRIVATE ShairLib)
