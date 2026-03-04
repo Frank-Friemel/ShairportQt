@@ -41,7 +41,7 @@ public:
     void Configure(bool enable) noexcept override;
     void Initialize(IMultimediaStateProvider* provider, QObject* parent, NativeWindowHandle nativeWindowHandle) noexcept override;
     void Cleanup() noexcept override;
-    void OnPlayState(bool isPlaying) noexcept override;
+    void OnUpdatePlayState(bool isPlaying) noexcept override;
     void OnUpdateMMState(bool isEnabled) noexcept override;
     void OnUpdateTrackInfo() noexcept override;
     void OnUpdateVolume(double v) noexcept override;

@@ -311,7 +311,7 @@ public Q_SLOTS:
     void OpenUri(const QString Uri);
 
 protected:
-    void OnPlayState(bool isPlaying) noexcept;
+    void OnUpdatePlayState(bool isPlaying) noexcept;
     void OnUpdateMMState(bool isEnabled) noexcept;
     void OnUpdateTrackInfo(wstring&& track, wstring&& album, wstring&& artist, vector<unsigned char>&& art) noexcept;
     void OnUpdateVolume(double v) noexcept;
@@ -377,7 +377,7 @@ void MediaPlayer2Player::DeleteCurrentAlbumArt() noexcept
     }
 }
 
-void MediaPlayer2Player::OnPlayState(bool isPlaying) noexcept
+void MediaPlayer2Player::OnUpdatePlayState(bool isPlaying) noexcept
 {
     try
     {
@@ -530,7 +530,7 @@ void MediaPlayer2Player::Pause()
     {
         SetTimex();
         m_provider->PlayPause();
-        OnPlayState(false);
+        OnUpdatePlayState(false);
     }
 }
 
@@ -538,7 +538,7 @@ void MediaPlayer2Player::PlayPause()
 {
     SetTimex();
     m_provider->PlayPause();
-    OnPlayState(!m_isPlaying);
+    OnUpdatePlayState(!m_isPlaying);
 }
 
 void MediaPlayer2Player::Stop()
@@ -547,7 +547,7 @@ void MediaPlayer2Player::Stop()
     {
         SetTimex();
         m_provider->PlayPause();
-        OnPlayState(false);
+        OnUpdatePlayState(false);
     }
 }
 
@@ -562,7 +562,7 @@ void MediaPlayer2Player::Play()
     {
         SetTimex();
         m_provider->PlayPause();
-        OnPlayState(true);
+        OnUpdatePlayState(true);
     }
 }
 
@@ -901,7 +901,7 @@ void MultimediaStateReceiver::Start() noexcept
                         if (lastButtonPressTimex == 0 || (::time(nullptr)-lastButtonPressTimex) >= 3)
                         {
                             lastButtonPressTimex = 0;
-                            mprisHost->m_player->OnPlayState(isPlaying);
+                            mprisHost->m_player->OnUpdatePlayState(isPlaying);
                             mprisHost->m_player->OnUpdateMMState(isEnabled);
                         }
                         
@@ -989,7 +989,7 @@ void MultimediaStateReceiver::Cleanup() noexcept
     m_parent = nullptr;
 }
 
-void MultimediaStateReceiver::OnPlayState(bool isPlaying) noexcept
+void MultimediaStateReceiver::OnUpdatePlayState(bool isPlaying) noexcept
 {
     if (!m_stop)
     {

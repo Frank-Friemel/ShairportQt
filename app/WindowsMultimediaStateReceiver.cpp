@@ -387,7 +387,7 @@ void MultimediaStateReceiver::Cleanup() noexcept
     m_windowHandle = NativeWindowHandle{};
 }
 
-void MultimediaStateReceiver::OnPlayState(bool isPlaying) noexcept
+void MultimediaStateReceiver::OnUpdatePlayState(bool isPlaying) noexcept
 {
     if (!m_stop)
     {

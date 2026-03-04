@@ -1313,7 +1313,7 @@ void MainDlg::OnPlayState(bool isPlaying)
     }
     if (wasPlaying != isPlaying)
     {
-        m_multimediaStateReceiver->OnPlayState(isPlaying);
+        m_multimediaStateReceiver->OnUpdatePlayState(isPlaying);
         OnUpdateTray();
     }
 }
@@ -2561,7 +2561,7 @@ void MainDlg::OnOptions()
             if (newSysMediaControl)
             {
                 UpdateMMState();
-                m_multimediaStateReceiver->OnPlayState(m_isPlaying);
+                m_multimediaStateReceiver->OnUpdatePlayState(m_isPlaying);
                 m_multimediaStateReceiver->OnUpdateTrackInfo();
             }
         }
