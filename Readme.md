@@ -132,7 +132,7 @@ do is to provide a name for your instance configuration by applying the command 
 are limited to characters `A-Z`, `a-z` and `0-9`.
 
 ShairportQt supports multiple languages. Your preferred language is being detected automatically, usually.
-In case you would like to set it manually ... please edit the file ".ShairportQt_Config.json" which is located
+In case you would like to set it manually ... please edit the file `.ShairportQt_Config.json` which is located
 in your home folder. The format is `json`. So, please be sure **not** to break the config when you're making
 changes (e.g. please add a comma, if it's not the last entry). You may set the key `Language` to one of these values:
 
@@ -149,6 +149,12 @@ Example forcing the language to be Japanese:
 ```
 
 > **Important:** Manually editing the config works only when `ShairportQt` **is not running**
+
+#### System Integrated Media Control
+
+ShairportQt integrates its controls into your system. Windows calls this `SMTC`, Linux calls it `MPRIS`. The purpose is the same — allowing the system or other applications to control installed media applications. If you don't need or want this feature, you may disable it by unchecking the checkbox in the `options` dialog.
+
+Please keep in mind that ShairportQt is designed to act as a media server. The client is the device sending the music, which connects to ShairportQt. So if the remote device disconnects its controls from ShairportQt, those controls will also become unavailable to `SMTC`/`MPRIS`.
 
 ### Avahi (aka Bonjour)
 
