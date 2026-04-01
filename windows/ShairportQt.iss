@@ -10,7 +10,7 @@
 ;   The installer will be written to windows\Output\ShairportQt_Setup_<version>.exe
 
 #define AppName      "ShairportQt"
-#define AppVersion   "1.0.0.5"
+#define AppVersion   "1.0.0.6"
 #define AppPublisher "Frank Friemel"
 #define AppURL       "https://github.com/Frank-Friemel/ShairportQt"
 #define AppExeName   "ShairportQt.exe"

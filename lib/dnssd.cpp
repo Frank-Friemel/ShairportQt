@@ -5,11 +5,14 @@
 #include "LayerCake.h"
 #include "libutils.h"
 #include "Networking.h"
+#include <set>
 
 static uint8_t TxtLen(const char* txt) noexcept;
-static char* DnsParseDomainName(char* p, char** x) noexcept;
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <windns.h>
+#pragma comment(lib, "dnsapi.lib")
+#else
 // LoadLibrary for Unix -> dlXXXX
 #include <dlfcn.h>
 #endif
@@ -32,6 +35,433 @@ static char* DnsParseDomainName(char* p, char** x) noexcept;
 
 using namespace std;
 using namespace string_literals;
+
+#ifdef _WIN32
+
+static void TXTRecordSetValue(list<wstring>& records, vector<const wchar_t*>& keys, vector<const wchar_t*>& values,
+    const char* key, uint8_t, const char* value)
+{
+    records.push_back(CA2WEX(key));
+    keys.push_back(records.back().c_str());
+    records.push_back(CA2WEX(value));
+    values.push_back(records.back().c_str());
+}
+
+static void SplitServiceDef(const char* name, string& serviceName, string& regtype, string& domain)
+{
+    // e.g. "HP Color LaserJet MFP M277dw (C162F4)._http._tcp.local"
+    const char* c = name;
+    int n = 0;
+
+    while (*c)
+    {
+        if (*c == '.')
+        {
+            ++n;
+
+            if (n != 2)
+            {
+                ++c;
+                continue;
+            }
+        }
+        switch (n)
+        {
+            case 0:
+            {
+                serviceName += *c;
+            }
+            break;
+
+            case 1:
+            case 2:
+            {
+                regtype += *c;
+            }
+            break;
+
+            case 3:
+            {
+                domain += *c;
+            }
+            break;
+
+            default:
+            {
+                assert(false);
+            }
+            break;
+        }
+        ++c;
+    }
+
+    if (domain.empty())
+    {
+        domain = ".local"s;
+    }
+    else
+    {
+        if (domain[0] != '.')
+        {
+            domain = "."s + domain;
+        }
+    }
+}
+
+static VOID WINAPI MyDnsServiceUnregisterCallback(DWORD, LPVOID, PDNS_SERVICE_INSTANCE);
+static VOID WINAPI MyDnsServiceRegisterComplete(DWORD, PVOID, PDNS_SERVICE_INSTANCE);
+static VOID WINAPI MyDnsServiceBrowseComplete(DWORD, PVOID, PDNS_RECORD);
+static VOID WINAPI MyDnsServiceResolveComplete(DWORD, PVOID, PDNS_SERVICE_INSTANCE);
+
+class DnsServiceContext;
+
+static mutex mtxContextRegister;
+static set<DnsServiceContext*> contextRegister;
+
+class DnsServiceContext
+{
+protected:
+    DnsServiceContext(IDnsSDEvents* cb = nullptr, wstring&& queryName = {})
+        : callback{ cb }
+        , m_queryName{ move(queryName) }
+    {
+        const lock_guard<mutex> guard{ mtxContextRegister };
+        contextRegister.insert(this);
+    }
+
+public:
+    virtual ~DnsServiceContext() = default;
+
+    DnsServiceContext(const DnsServiceContext&) = delete;
+    DnsServiceContext& operator=(const DnsServiceContext&) = delete;
+
+public:    
+    virtual void Destroy() noexcept
+    {
+        const lock_guard<mutex> guard{ mtxContextRegister };
+
+        if (contextRegister.find(this) != contextRegister.end())
+        {
+            contextRegister.erase(this);
+            delete this;
+        }
+    }
+
+public:
+    IDnsSDEvents* const callback;
+
+protected:
+    const wstring m_queryName;
+    DNS_SERVICE_CANCEL m_cancel{};
+};
+
+class DnsRegisterServiceContext
+    : public DnsServiceContext
+{
+public:
+    DnsRegisterServiceContext(const wstring serviceName, uint16_t port, vector<const wchar_t*>& keys,
+        vector<const wchar_t*>& values)
+    {
+        WCHAR hostName[8192];
+        DWORD sizeHostname = 8192;
+        if (!GetComputerNameW(hostName, &sizeHostname))
+        {
+            throw runtime_error("hostname is too long");
+        }
+
+        const auto computerName = wstring(hostName, sizeHostname) + L".local"s;
+
+        assert(keys.size() == values.size());
+
+        m_instance = DnsServiceConstructInstance(
+            serviceName.c_str(),
+            computerName.c_str(),
+            nullptr,
+            nullptr,
+            port,
+            0,
+            0,
+            static_cast<DWORD>(keys.size()),
+            keys.data(),
+            values.data()
+        );
+
+        if (!m_instance)
+        {
+            throw runtime_error("failed to construct dns service instance");
+        }
+
+        m_serviceRegisterRequest.Version = DNS_QUERY_REQUEST_VERSION1;
+		m_serviceRegisterRequest.InterfaceIndex = 0;
+		m_serviceRegisterRequest.pServiceInstance = m_instance;
+		m_serviceRegisterRequest.pRegisterCompletionCallback = MyDnsServiceRegisterComplete;
+		m_serviceRegisterRequest.pQueryContext = this;
+		m_serviceRegisterRequest.unicastEnabled = false;
+
+        const auto status = DnsServiceRegister(&m_serviceRegisterRequest, nullptr);
+
+		if (status != DNS_REQUEST_PENDING)
+        {
+			throw runtime_error("failed to register dns service");
+		}        
+    }
+
+    ~DnsRegisterServiceContext() override
+    {
+        if (m_instance)
+        {
+            DnsServiceFreeInstance(m_instance);
+        }
+        if (m_registeredInstance && m_registeredInstance != m_instance)
+        {
+            DnsServiceFreeInstance(m_registeredInstance);
+        }
+        m_registeredInstance = nullptr;
+        m_instance = nullptr;
+    }
+
+    void Destroy() noexcept override
+    {
+        m_serviceRegisterRequest.pRegisterCompletionCallback = MyDnsServiceUnregisterCallback;
+        
+        const DWORD result = DnsServiceDeRegister(&m_serviceRegisterRequest, nullptr);
+        assert(result == DNS_REQUEST_PENDING || result == ERROR_SUCCESS);
+ 
+        if (result == ERROR_SUCCESS)
+        {
+            DnsServiceContext::Destroy();
+        }
+    }
+
+    void SetRegisteredInstance(PDNS_SERVICE_INSTANCE instance) noexcept
+    {
+        assert(!m_registeredInstance);
+        m_registeredInstance = instance;
+        m_serviceRegisterRequest.pRegisterCompletionCallback = MyDnsServiceUnregisterCallback;
+        m_serviceRegisterRequest.pServiceInstance = instance;
+    }
+
+protected:
+    PDNS_SERVICE_INSTANCE m_instance = nullptr;
+    PDNS_SERVICE_INSTANCE m_registeredInstance = nullptr;
+    DNS_SERVICE_REGISTER_REQUEST m_serviceRegisterRequest{};
+};
+
+class DnsBrowseServiceContext
+    : public DnsServiceContext
+{
+public:
+    DnsBrowseServiceContext(IDnsSDEvents* cb, wstring&& queryName)
+        : DnsServiceContext{ cb , move(queryName) }
+    {
+        m_serviceBrowseRequest.Version = DNS_QUERY_REQUEST_VERSION1;
+        m_serviceBrowseRequest.InterfaceIndex = 0;
+        m_serviceBrowseRequest.QueryName = m_queryName.c_str();
+        m_serviceBrowseRequest.pBrowseCallback  = MyDnsServiceBrowseComplete;
+        m_serviceBrowseRequest.pQueryContext = this;
+
+        const auto status = DnsServiceBrowse(&m_serviceBrowseRequest, &m_cancel);
+
+        if (status != DNS_REQUEST_PENDING)
+        {
+            throw runtime_error("failed to browse dns service");
+        }        
+    }
+
+    void Destroy() noexcept override
+    {
+        const DWORD result = DnsServiceBrowseCancel(&m_cancel);
+        assert(result == DNS_REQUEST_PENDING || result == ERROR_SUCCESS);
+
+        if (result == ERROR_SUCCESS)
+        {
+            DnsServiceContext::Destroy();
+        }
+    }
+
+    uint32_t GetInterfaceIndex() const noexcept
+    {
+        return m_serviceBrowseRequest.InterfaceIndex;
+    }
+
+protected:
+    DNS_SERVICE_BROWSE_REQUEST  m_serviceBrowseRequest{};
+};
+
+class DnsResolveServiceContext
+    : public DnsServiceContext
+{
+public:
+    DnsResolveServiceContext(IDnsSDEvents* cb, wstring&& queryName, uint32_t interfaceIndex)
+        : DnsServiceContext{ cb , move(queryName) }
+    {
+        m_serviceResolveRequest.Version = DNS_QUERY_REQUEST_VERSION1;
+        m_serviceResolveRequest.InterfaceIndex = interfaceIndex;
+        m_serviceResolveRequest.QueryName = (PWSTR)m_queryName.data();
+        m_serviceResolveRequest.pResolveCompletionCallback = MyDnsServiceResolveComplete;
+        m_serviceResolveRequest.pQueryContext = this;
+
+        const auto status = DnsServiceResolve(&m_serviceResolveRequest, &m_cancel);
+
+        if (status != DNS_REQUEST_PENDING)
+        {
+            throw runtime_error("failed to browse dns service");
+        }
+    }
+
+    void Destroy() noexcept override
+    {
+        DWORD result = DnsServiceResolveCancel(&m_cancel);
+        assert(result == DNS_REQUEST_PENDING || result == ERROR_SUCCESS);
+ 
+        if (result == ERROR_SUCCESS)
+        {
+            DnsServiceContext::Destroy();
+        }
+    }
+
+protected:
+    DNS_SERVICE_RESOLVE_REQUEST m_serviceResolveRequest{};
+};
+
+static VOID WINAPI MyDnsServiceUnregisterCallback(DWORD, LPVOID context, PDNS_SERVICE_INSTANCE)
+{
+    assert(context);
+    DnsServiceContext* dnsServiceContext = (DnsServiceContext*)context;
+    const lock_guard<mutex> guard{ mtxContextRegister };
+
+    if (contextRegister.find(dnsServiceContext) == contextRegister.end())
+    {
+        return;
+    }
+    contextRegister.erase(dnsServiceContext);
+    delete dnsServiceContext;
+}
+
+static VOID WINAPI MyDnsServiceRegisterComplete(DWORD status, PVOID context, PDNS_SERVICE_INSTANCE instance)
+{
+    assert(context);
+    DnsServiceContext* dnsServiceContext = (DnsServiceContext*)context;
+    {
+        const lock_guard<mutex> guard{ mtxContextRegister };
+
+        if (contextRegister.find(dnsServiceContext) == contextRegister.end())
+        {
+            return;
+        }
+    }
+
+    if (status == ERROR_SUCCESS)
+    {
+        ((DnsRegisterServiceContext*)dnsServiceContext)->SetRegisteredInstance(instance);
+    }
+    else
+    {
+        // unexpected
+        assert(false);
+        const lock_guard<mutex> guard{ mtxContextRegister };
+        contextRegister.erase(dnsServiceContext);
+        delete dnsServiceContext;
+    }
+}
+
+static VOID WINAPI MyDnsServiceBrowseComplete(DWORD status, PVOID context, PDNS_RECORD records)
+{
+    assert(context);
+    const ScopeContext cleanup{ [&records]() {
+        if (records)
+        {
+            DnsRecordListFree(records, DnsFreeRecordList);
+        }
+    }};
+
+    DnsServiceContext* dnsServiceContext = (DnsServiceContext*)context;
+    {
+        const lock_guard<mutex> guard{ mtxContextRegister };
+
+        if (contextRegister.find(dnsServiceContext) == contextRegister.end())
+        {
+            return;
+        }
+        if (status != ERROR_SUCCESS)
+        {
+            if (status == ERROR_CANCELLED)
+            {
+                contextRegister.erase(dnsServiceContext);
+                delete dnsServiceContext;
+            }
+            return;
+        }
+    }
+
+    const uint32_t interfaceIndex = ((DnsBrowseServiceContext*)dnsServiceContext)->GetInterfaceIndex();
+
+    for (auto record = records; record; record = record->pNext)
+    {
+		if (record->wType == DNS_TYPE_PTR)
+        {
+            try
+            {
+                string serviceName;
+                string regtype;
+                string replyDomain;
+                string name = CW2AEX(wstring((const wchar_t*)(record->Data.PTR.pNameHost)));
+
+                SplitServiceDef(name.c_str(), serviceName, regtype, replyDomain);
+                
+                const bool registered = record->dwTtl > 0 ? true : false;
+
+                assert(dnsServiceContext->callback);
+                dnsServiceContext->callback->OnDNSServiceBrowseReply(registered, interfaceIndex,
+                    serviceName.c_str(), regtype.c_str(), replyDomain.c_str());
+            }
+            catch(...)
+            {
+            }
+		}
+	}
+}
+    
+static VOID WINAPI MyDnsServiceResolveComplete(DWORD status, PVOID context, PDNS_SERVICE_INSTANCE instance)
+{
+    assert(context);
+    const ScopeContext cleanup{ [&instance]() {
+        if (instance)
+        {
+            DnsServiceFreeInstance(instance);
+        }
+    }};
+    DnsServiceContext* dnsServiceContext = (DnsServiceContext*)context;
+    {
+        const lock_guard<mutex> guard{ mtxContextRegister };
+
+        if (contextRegister.find(dnsServiceContext) == contextRegister.end())
+        {
+            return;
+        }
+        if (status != ERROR_SUCCESS)
+        {
+            if (status == ERROR_CANCELLED)
+            {
+                contextRegister.erase(dnsServiceContext);
+                delete dnsServiceContext;
+            }
+            return;
+        }
+    }
+
+    try
+    {
+        assert(dnsServiceContext->callback);
+        dnsServiceContext->callback->OnServiceResolved(context, nullptr, 0, CW2AEX(wstring(instance->pszHostName)).c_str(),
+                CW2AEX(wstring(instance->pszInstanceName)).c_str(), SWAP16(instance->wPort));
+    }
+    catch(...)
+    {
+    }
+}
+
+#endif // _WIN32
 
 class DnsSD::Descriptor
 {
@@ -124,8 +554,34 @@ private:
 public:
     Descriptor()
     {
+        m_module = nullptr;
+        Load();
+    }
+
+    ~Descriptor()
+    {
+        Unload();
+    }
+
+    bool IsValid() const noexcept
+    {
+        return !!m_module;
+    }
+    
+    bool Load()
+    {
+        if (IsValid())
+        {
+            return true;
+        }
 #ifdef _WIN32
         m_module = LoadLibraryA("dnssd.dll");
+
+        if (!m_module)
+        {
+            // Apple Bonjour is optional on Win32
+            return false;
+        }
 #else
 	    m_module = dlopen("libdns_sd.so", RTLD_LAZY);
 
@@ -161,14 +617,9 @@ public:
             Unload();
             throw runtime_error("Could not load dnssd shared library functions");
         }
+        return true;
     }
 
-    ~Descriptor()
-    {
-        Unload();
-    }
-
-private:
     void Unload() noexcept
     {
         HMODULE module = nullptr;
@@ -206,11 +657,13 @@ public:
 	_typeTXTRecordGetLength         m_funcTXTRecordGetLength        = nullptr;
 	_typeTXTRecordGetBytesPtr       m_funcTXTRecordGetBytesPtr      = nullptr;
 	_typeTXTRecordDeallocate        m_funcTXTRecordDeallocate       = nullptr;
-
 };
 
-DnsSD::DnsSD()
+DnsSD::DnsSD(bool forceNative)
     : m_descriptor{ make_unique<Descriptor>() }
+#ifdef _WIN32    
+    , m_forceNative{ forceNative || !m_descriptor->IsValid() }
+#endif
 {
 }
 
@@ -220,40 +673,92 @@ DnsSD::~DnsSD()
 
 DnsHandlePtr DnsSD::CreateRaopServiceFromConfig(const SharedPtr<IValueCollection>& config, bool metaInfo)
 {
-    const bool hasPassword = VariantValue::Key("HasPassword").Get<bool>(config) &&
+    const bool      hasPassword = VariantValue::Key("HasPassword").Get<bool>(config) &&
                                 !VariantValue::Key("Password").Get<string>(config).empty();
-    const auto hwAddr = VariantValue::Key("HWaddress").Get<vector<uint8_t>>(config);
-    const auto apName = VariantValue::Key("APname").Get<string>(config);
-    const uint16_t port = SWAP16(VariantValue::Key("RaopPort").Get<uint16_t>(config));
+    const auto      hwAddr      = VariantValue::Key("HWaddress").Get<vector<uint8_t>>(config);
+    const uint16_t  port        = VariantValue::Key("RaopPort").Get<uint16_t>(config);
+    const wstring   name        = CA2WEX(EncodeToHex(hwAddr, true)) + L"@"s + VariantValue::Key("APname").Get<wstring>(config);
+    const wstring   regType     = L"_raop._tcp"s;
 
-    const string name = EncodeToHex(hwAddr, true) + "@"s + apName;
+#ifdef _WIN32
+    if (m_forceNative)
+    {
+        // use native DnsSD
+        list<wstring> records;
+        vector<const wchar_t*> keys;
+        vector<const wchar_t*> values;
+
+        TXTRecordSetValue(records, keys, values, "txtvers", TxtLen(RAOP_TXTVERS), RAOP_TXTVERS);
+        TXTRecordSetValue(records, keys, values, "ch", TxtLen(RAOP_CH), RAOP_CH);
+        TXTRecordSetValue(records, keys, values, "cn", TxtLen(RAOP_CN), RAOP_CN);
+        TXTRecordSetValue(records, keys, values, "et", TxtLen(RAOP_ET), RAOP_ET);
+        TXTRecordSetValue(records, keys, values, "sv", TxtLen(RAOP_SV), RAOP_SV);
+
+        if (!hasPassword)
+        {
+            TXTRecordSetValue(records, keys, values, "da", TxtLen(RAOP_DA), RAOP_DA);
+        }
+        TXTRecordSetValue(records, keys, values, "sr", TxtLen(RAOP_SR), RAOP_SR);
+        TXTRecordSetValue(records, keys, values, "ss", TxtLen(RAOP_SS), RAOP_SS);
+        
+        if (hasPassword) 
+        {
+            TXTRecordSetValue(records, keys, values, "pw", TxtLen("true"), "true");
+        } 
+        else 
+        {
+            TXTRecordSetValue(records, keys, values, "pw", TxtLen("false"), "false");
+        }
+        TXTRecordSetValue(records, keys, values, "vn", TxtLen(RAOP_VN), RAOP_VN);
+        TXTRecordSetValue(records, keys, values, "tp", TxtLen(RAOP_TP), RAOP_TP);
+
+        if (!metaInfo)
+        {
+            TXTRecordSetValue(records, keys, values, "md", TxtLen(RAOP_NO_MD), RAOP_NO_MD);
+        }
+        else
+        {
+            TXTRecordSetValue(records, keys, values, "md", TxtLen(RAOP_MD), RAOP_MD);
+        }
+        if (!hasPassword)
+        {
+            TXTRecordSetValue(records, keys, values, "vs", TxtLen(GLOBAL_VERSION), GLOBAL_VERSION);
+        }
+        TXTRecordSetValue(records, keys, values, "sm", TxtLen(RAOP_SM), RAOP_SM);
+        TXTRecordSetValue(records, keys, values, "ek", TxtLen(RAOP_EK), RAOP_EK);
+ 
+        const wstring serviceName = name + L"."s + regType + L".local"s;
     
-	TXTRecordRef txtRecord;
+        return make_shared<DnsSDHandle>(this, new DnsRegisterServiceContext(serviceName, port, keys, values));
+    }
+#endif
 
-	m_descriptor->m_funcTXTRecordCreate(&txtRecord, 0, NULL);
-	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "txtvers", TxtLen(RAOP_TXTVERS), RAOP_TXTVERS);
-	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "ch", TxtLen(RAOP_CH), RAOP_CH);
-	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "cn", TxtLen(RAOP_CN), RAOP_CN);
-	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "et", TxtLen(RAOP_ET), RAOP_ET);
-	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "sv", TxtLen(RAOP_SV), RAOP_SV);
+    TXTRecordRef txtRecord;
+
+    m_descriptor->m_funcTXTRecordCreate(&txtRecord, 0, NULL);
+    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "txtvers", TxtLen(RAOP_TXTVERS), RAOP_TXTVERS);
+    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "ch", TxtLen(RAOP_CH), RAOP_CH);
+    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "cn", TxtLen(RAOP_CN), RAOP_CN);
+    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "et", TxtLen(RAOP_ET), RAOP_ET);
+    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "sv", TxtLen(RAOP_SV), RAOP_SV);
 
     if (!hasPassword)
     {
         m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "da", TxtLen(RAOP_DA), RAOP_DA);
     }
-	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "sr", TxtLen(RAOP_SR), RAOP_SR);
-	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "ss", TxtLen(RAOP_SS), RAOP_SS);
-	
+    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "sr", TxtLen(RAOP_SR), RAOP_SR);
+    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "ss", TxtLen(RAOP_SS), RAOP_SS);
+    
     if (hasPassword) 
     {
-		m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "pw", TxtLen("true"), "true");
-	} 
+        m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "pw", TxtLen("true"), "true");
+    } 
     else 
     {
-		m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "pw", TxtLen("false"), "false");
-	}
-	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "vn", TxtLen(RAOP_VN), RAOP_VN);
-	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "tp", TxtLen(RAOP_TP), RAOP_TP);
+        m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "pw", TxtLen("false"), "false");
+    }
+    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "vn", TxtLen(RAOP_VN), RAOP_VN);
+    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "tp", TxtLen(RAOP_TP), RAOP_TP);
 
     if (!metaInfo)
     {
@@ -267,13 +772,13 @@ DnsHandlePtr DnsSD::CreateRaopServiceFromConfig(const SharedPtr<IValueCollection
     {
         m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "vs", TxtLen(GLOBAL_VERSION), GLOBAL_VERSION);
     }
-	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "sm", TxtLen(RAOP_SM), RAOP_SM);
-	m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "ek", TxtLen(RAOP_EK), RAOP_EK);
+    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "sm", TxtLen(RAOP_SM), RAOP_SM);
+    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "ek", TxtLen(RAOP_EK), RAOP_EK);
 
     DNSServiceRef sdRef = nullptr;
 
-	const auto error = m_descriptor->m_funcDNSServiceRegister(&sdRef, 0, kDNSServiceInterfaceIndexAny, name.c_str()
-        , "_raop._tcp", NULL, NULL, port, 
+    const auto error = m_descriptor->m_funcDNSServiceRegister(&sdRef, 0, kDNSServiceInterfaceIndexAny, CW2AEX(name).c_str()
+        , CW2AEX(regType).c_str(), NULL, NULL, SWAP16(port), 
         m_descriptor->m_funcTXTRecordGetLength(&txtRecord), 
         m_descriptor->m_funcTXTRecordGetBytesPtr(&txtRecord), nullptr, nullptr);
 
@@ -306,6 +811,14 @@ DnsHandlePtr DnsSD::BrowseForService(const char* strRegType, IDnsSDEvents* cb)
 {
     assert(cb);
 
+#ifdef _WIN32  
+    if (m_forceNative)
+    {
+        // use native DnsSD
+        wstring queryName = CA2WEX(string(strRegType)) + L".local"s;
+        return make_shared<DnsSDHandle>(this, new DnsBrowseServiceContext(cb, move(queryName)));
+    }
+#endif
     DNSServiceRef sdRef = nullptr;
 
     const auto error = m_descriptor->m_funcDNSServiceBrowse(&sdRef, 0, 0, strRegType, NULL, MyDNSServiceBrowseReply, cb);
@@ -336,6 +849,29 @@ static void DNSSD_API MyDNSServiceResolveReply
 DnsHandlePtr DnsSD::ResolveService(uint32_t interfaceIndex,
     const string& strService, const string& strRegType, const string& strReplyDomain, IDnsSDEvents* cb)
 {
+#ifdef _WIN32  
+    if (m_forceNative)
+    {
+        // use native DnsSD
+        string domain;
+
+        if (!strReplyDomain.empty())
+        {
+            if (strReplyDomain[0] != '.')
+            {
+                domain = "."s;
+            }
+            domain += strReplyDomain;
+        }
+        else
+        {
+            domain = ".local"s;
+        }
+
+        wstring queryName = CA2WEX(strService + "."s + strRegType + domain);
+        return make_shared<DnsSDHandle>(this, new DnsResolveServiceContext(cb, move(queryName), interfaceIndex));
+    }
+#endif    
     DNSServiceRef sdRef = nullptr;
 
     const auto error = m_descriptor->m_funcDNSServiceResolve(&sdRef, 0, interfaceIndex, strService.c_str()
@@ -345,100 +881,48 @@ DnsHandlePtr DnsSD::ResolveService(uint32_t interfaceIndex,
     return make_shared<DnsSDHandle>(this, static_cast<void*>(sdRef), static_cast<int32_t>(error));
 }
 
-static void DNSSD_API MyDNSServiceQueryRecordReply
-(
-    DNSServiceRef                       sdRef,
-    DNSServiceFlags                     flags,
-    uint32_t                            interfaceIndex,
-    DNSServiceErrorType                 errorCode,
-    const char*                         fullname,
-    uint16_t                            rrtype,
-    uint16_t                            rrclass,
-    uint16_t                            rdlen,
-    const void*                         rdata,
-    uint32_t                            ttl,
-    void*                               context
-)
+bool DnsSD::UsesAppleBonjour() const noexcept
 {
-    assert(context);
-    IDnsSDEvents* cb = (IDnsSDEvents*)context;
-
-    string host;
-    
-    switch (rrtype)
+#ifdef _WIN32
+    if (m_forceNative)
     {
-    case kDNSServiceType_A:
-    {
-        struct my_sockaddr_in
-        {
-            int16_t     sin_family;
-            uint16_t    sin_port;
-            struct  
-            {
-                uint8_t s_b1, s_b2, s_b3, s_b4;
-            }           sin_addr;
-            int8_t      sin_zero[8];
-        };
-        struct my_sockaddr_in sa4{};
-
-        if (sizeof(sa4) >= rdlen)
-        {
-            memcpy(&sa4.sin_addr, rdata, rdlen);
-
-            try
-            {
-                host = 
-                    to_string(sa4.sin_addr.s_b1) + "."s +
-                    to_string(sa4.sin_addr.s_b2) + "."s +
-                    to_string(sa4.sin_addr.s_b3) + "."s +
-                    to_string(sa4.sin_addr.s_b4);
-            }
-            catch (...)
-            {
-            }
-        }
+        return false;
     }
-    break;
-
-    case kDNSServiceType_SRV:
-    {
-        char* rd = (char*)malloc(rdlen);
-
-        if (rd)
-        {
-            memcpy(rd, rdata, rdlen);
-
-            char* x = rd + 3 * sizeof(uint16_t);
-            char* name = DnsParseDomainName(x, &x);
-
-            if (name)
-            {
-                try
-                {
-                    host = name;
-                }
-                catch (...)
-                {
-                }
-                free(name);
-            }
-            free(rd);
-        }
-    }
-    break;
-    }
-
-    cb->OnServiceQueryRecord(host);
+#endif
+    return m_descriptor->IsValid();
 }
 
-DnsHandlePtr DnsSD::ServiceQueryRecord(uint32_t interfaceIndex, const string& fullname, IDnsSDEvents* cb)
+bool DnsSD::SetForceNative(bool forceNative) noexcept
 {
-    DNSServiceRef sdRef = nullptr;
-
-    const auto error = m_descriptor->m_funcDNSServiceQueryRecord(&sdRef, 0, interfaceIndex, fullname.c_str(),
-        kDNSServiceType_SRV, kDNSServiceClass_IN, MyDNSServiceQueryRecordReply, cb);
-    
-    return make_shared<DnsSDHandle>(this, static_cast<void*>(sdRef), static_cast<int32_t>(error));
+#ifdef _WIN32    
+    if (m_forceNative.load() != forceNative)
+    {
+        m_forceNative = forceNative;
+        
+        if (m_forceNative)
+        {
+            m_descriptor->Unload();
+        }
+        else
+        {
+            try
+            {
+                if (m_descriptor->Load())
+                {
+                    return true;
+                }
+            }
+            catch(...)
+            {
+            }
+            // we can not switch to Bonjour, if it's not available
+            // so we stick to the system native dnsSD
+            m_forceNative = true;
+            return false;
+        }
+    }
+#endif
+    return true;
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -453,8 +937,9 @@ DnsSDHandle::DnsSDHandle(SharedPtr<DnsSD> dnsSD, void* handle /* = nullptr */, i
 
     if (m_handle && static_cast<DNSServiceErrorType>(m_error) == kDNSServiceErr_NoError)
     {
-        m_processResult = async(launch::async, [this]() -> void
-            {
+        if (m_dnsSD->UsesAppleBonjour())
+        {
+            m_processResult = async(launch::async, [this]() -> void {
                 if (m_stop)
                 {
                     return;
@@ -489,6 +974,7 @@ DnsSDHandle::DnsSDHandle(SharedPtr<DnsSD> dnsSD, void* handle /* = nullptr */, i
                     }
                 }
             });
+        }
     }
 }
 
@@ -498,19 +984,30 @@ DnsSDHandle::~DnsSDHandle()
 
     if (static_cast<DNSServiceErrorType>(m_error) == kDNSServiceErr_NoError)
     {
-        assert(m_handle);
-        m_dnsSD->m_descriptor->m_funcDNSServiceRefDeallocate(static_cast<DNSServiceRef>(m_handle));
-        
-        if (m_processResult.valid())
+        if (m_dnsSD->UsesAppleBonjour())
         {
-            try
+            assert(m_handle);
+            m_dnsSD->m_descriptor->m_funcDNSServiceRefDeallocate(static_cast<DNSServiceRef>(m_handle));
+            
+            if (m_processResult.valid())
             {
-                m_processResult.wait();
+                try
+                {
+                    m_processResult.wait();
+                }
+                catch (...)
+                {
+                    assert(false);
+                }
             }
-            catch (...)
-            {
-                assert(false);
-            }
+        }
+        else
+        {
+#ifdef _WIN32
+            DnsServiceContext* context = (DnsServiceContext*)m_handle;
+            assert(context);
+            context->Destroy();
+#endif           
         }
     }
 }
@@ -533,92 +1030,3 @@ static uint8_t TxtLen(const char* txt) noexcept
     return static_cast<uint8_t>(l);
 }
 
-static char* DnsParseDomainName(char* p, char** x) noexcept
-{
-    uint8_t* v8;
-    uint16_t* v16, skip;
-    uint16_t i, j, dlen, len;
-    int more, compressed;
-    char* name, * start;
-
-    start = *x;
-    compressed = 0;
-    more = 1;
-    name = (char*)malloc(1);
-
-    if (!name)
-    {
-        return nullptr;
-    }
-    name[0] = '\0';
-    len = 1;
-    j = 0;
-    skip = 0;
-
-    while (more == 1)
-    {
-        v8 = (uint8_t*)*x;
-        dlen = *v8;
-
-        if ((dlen & 0xc0) == 0xc0)
-        {
-            v16 = (uint16_t*)*x;
-            *x = p + (SWAP16(*v16) & 0x3fff);
-            
-            if (compressed == 0)
-            {
-                skip += 2;
-            }
-            compressed = 1;
-            continue;
-        }
-
-        *x += 1;
-        if (dlen > 0)
-        {
-            len += dlen;
-            name = (char*)realloc(name, len);
-
-            if (!name)
-            {
-                return nullptr;
-            }
-        }
-
-        for (i = 0; i < dlen; i++)
-        {
-            name[j++] = **x;
-            *x += 1;
-        }
-        name[j] = '\0';
-
-        if (compressed == 0)
-        {
-            skip += (dlen + 1);
-        }
-        if (dlen == 0)
-        {
-            more = 0;
-        }
-        else
-        {
-            v8 = (uint8_t*)*x;
-            if (*v8 != 0)
-            {
-                len += 1;
-                name = (char*)realloc(name, len);
-
-                if (!name)
-                {
-                    return nullptr;
-                }
-                name[j++] = '.';
-                name[j] = '\0';
-            }
-        }
-    }
-
-    *x = start + skip;
-
-    return name;
-}

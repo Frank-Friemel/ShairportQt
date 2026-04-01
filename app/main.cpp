@@ -46,6 +46,12 @@ int main(int argc, char** argv)
 {
     bool debugLogToFile = false;
     string strConfigName;
+    bool debugLogLevel = 
+#ifndef NDEBUG
+            true;
+#else
+            false;
+#endif
 
     if (argv)
     {
@@ -79,6 +85,10 @@ int main(int argc, char** argv)
 
                         g_strConfigFileName.insert(pos, strConfigName);
                     }
+                }
+                else if (strstr(argv[nArg], "-debug"))
+                {
+                    debugLogLevel = true;
                 }
             }
         }
@@ -114,9 +124,11 @@ int main(int argc, char** argv)
             },
             spdlog::thread_pool(), spdlog::async_overflow_policy::overrun_oldest);
 
-#ifndef NDEBUG
-        logger->set_level(spdlog::level::level_enum::debug);
-#endif
+        if (debugLogLevel)
+        {
+            logger->set_level(spdlog::level::level_enum::debug);
+        }
+
         // make our logger the default-logger
         spdlog::set_default_logger(logger);
 
@@ -322,7 +334,7 @@ static void InitializeConfig(const SharedPtr<IValueCollection>& config)
 
         while (hwaddr->GetSize() != 6)
         {
-            b = static_cast<BYTE>(CreateRand(255));
+            b = LOBYTE(CreateRand(255));
             hwaddr->Write(&b, 1, nullptr);
         }
         VariantValue::Key("HWaddress").Set(config, hwaddr);

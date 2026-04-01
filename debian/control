@@ -1,6 +1,6 @@
 Package: shairport-qt
-Version: 1.0.0.5
-Maintainer: Frank Friemel <frank.friemel@gdata.de>
+Version: 1.0.0.6
+Maintainer: Frank Friemel <frank.friemel@icloud.com>
 Architecture: amd64
 Section: sound,utils,misc
 Priority: optional
