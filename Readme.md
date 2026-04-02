@@ -19,16 +19,16 @@ ShairportQt consists of a single executable file. So, there's not much to instal
 some hints for the various operating systems which worked for me. When updating your existing installation, please
 do the same, but make sure to close the running instance of ShairportQt first.
 
-#### Windows (x64)
+#### Windows (x64 and arm64)
 
 The [`Releases`](https://github.com/Frank-Friemel/ShairportQt/releases) section contains a setup executable.
-It will forward you to Apple's Bonjour download, if needed.
 
 Alternatively you may install manually by just downloading the `zip` file and copying the file `ShairportQt.exe` to your filesystem and create a Desktop-Link. That's it.
 
-Shairport depends on Apple's [`Bonjour`](https://support.apple.com/kb/DL999). Just start `ShairportQt`... it will guide you in case `Bonjour`
-is not installed on your machine. Please retry to start `ShairportQt.exe` after
-installation of `Bonjour`.
+> **New:** `ShairportQt` does *not* require Apple-Bonjour anymore. If you've installed it previously, feel free to uninstall Apple-Bonjour services, if no other applications depend on them.
+
+On my `Arm64` device `Smart App Control` prevented `ShairportQt` from starting. I needed to disable `Smart App Control`. `ShairportQt` is open
+source and the compiled binaries are not signed. Nevertheless they can be trusted.
 
 #### Linux (x64)
 
@@ -158,10 +158,8 @@ Please keep in mind that ShairportQt is designed to act as a media server. The c
 
 ### Avahi (aka Bonjour)
 
-For Windows you may need to download and install [`Bonjour`](https://support.apple.com/kb/DL999). 
-When being asked during the installation ... just dismiss the option to automatically update Bonjour's files in the background.
-This may save you from having another unnecessary process running on your machine.
-A desktop-link for Bonjour is also completely unnecessary.
+The latest version of ShairportQt does not depend on Apple's Bonjour anymore. Instead the Windows built-in service discovery functions
+are used.
 
 On my Raspbian ... I had to install `libavahi-compat-libdnssd-dev`.
 

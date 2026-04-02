@@ -40,8 +40,8 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
-ArchitecturesInstallIn64BitMode=x64compatible
-ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=arm64
+ArchitecturesAllowed=arm64
 UninstallDisplayIcon={app}\{#AppExeName}
 
 [Languages]
