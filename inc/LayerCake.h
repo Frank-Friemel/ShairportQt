@@ -22,6 +22,7 @@
 #include <thread>
 #include <condition_variable>
 #include <optional>
+#include <cmath>
 
 #ifdef _WIN32
 
@@ -133,6 +134,7 @@ inline uint32_t GetEnvironmentVariableA(const char* lpName, char* lpBuffer, uint
 }
 
 bool GetComputerNameA(char* lpBuffer, uint32_t* nSize);
+bool GetComputerNameW(wchar_t* lpBuffer, uint32_t* nSizeChars);
 
 bool DeleteFileA(const char* lpFileName);
 bool MoveFileA(const char* lpExistingFileName, const char* lpNewFileName);
@@ -370,6 +372,7 @@ typedef HANDLE              HGLOBAL;
 #define ERROR_HANDLE_EOF                29L
 #define ERROR_NOT_SUPPORTED             50L
 #define ERROR_IO_INCOMPLETE             996L
+#define ERROR_EXCEPTION_IN_SERVICE      1064L
 
 #define REFIID                          const IID &
 #define REFGUID                         const GUID &
@@ -1066,6 +1069,7 @@ bool CreateProcess(const char* cmd, FILE** readPipe, FILE** writePipe = nullptr)
 
 BSTR SysAllocString(const OLECHAR* psz);
 BSTR SysAllocStringLen(const OLECHAR* psz, size_t len);
+size_t SysStringLen(BSTR strVal);
 
 inline void SysFreeString(BSTR bstrString)
 {
@@ -2906,11 +2910,11 @@ namespace VariantValue
 
             if (VariantToFloat(temp))
             {
-                result = static_cast<T>(temp.dblVal);
+                result = (T)std::llround(temp.dblVal);
             }
             else
             {
-                result = static_cast<T>(std::stod(var.bstrVal));
+                result = (T)std::llround(std::stod(var.bstrVal));
             }
         }
         break;
@@ -2918,13 +2922,13 @@ namespace VariantValue
         case VT_DATE:
         case VT_R8:
         {
-            result = static_cast<T>(var.dblVal);
+            result = (T)std::llround(var.dblVal);
         }
         break;
 
         case VT_R4:
         {
-            result = static_cast<T>(var.fltVal);
+            result = (T)std::llroundf(var.fltVal);
         }
         break;
 
@@ -3025,7 +3029,7 @@ namespace VariantValue
 
         case VT_BSTR:
         {
-            result = var.bstrVal;
+            result = std::wstring(var.bstrVal, ::SysStringLen(var.bstrVal));
         }
         break;
 
@@ -3139,7 +3143,7 @@ namespace VariantValue
 
         case VT_BSTR:
         {
-            result = CW2AEX(var.bstrVal);
+            result = CW2AEX(std::wstring(var.bstrVal, ::SysStringLen(var.bstrVal)), CP_UTF8);
         }
         break;
 
@@ -3255,7 +3259,7 @@ namespace VariantValue
         {
             if (var.bstrVal)
             {
-                const size_t size = wcslen(var.bstrVal) * sizeof(wchar_t);
+                const size_t size = ::SysStringLen(var.bstrVal) * sizeof(wchar_t);
 
                 result.resize(size);
                 memcpy(result.data(), var.bstrVal, size);
@@ -3494,61 +3498,61 @@ namespace VariantValue
 
         case VT_R4:
         {
-            result = static_cast<double>(var.fltVal);
+            result = double(var.fltVal);
         }
         break;
 
         case VT_BOOL:
         {
-            result = static_cast<double>(var.boolVal != VARIANT_FALSE ? 1 : 0);
+            result = double(var.boolVal != VARIANT_FALSE ? 1 : 0);
         }
         break;
 
         case VT_I1:
         {
-            result = static_cast<double>(var.cVal);
+            result = double(var.cVal);
         }
         break;
 
         case VT_UI1:
         {
-            result = static_cast<double>(var.bVal);
+            result = double(var.bVal);
         }
         break;
 
         case VT_I2:
         {
-            result = static_cast<double>(var.iVal);
+            result = double(var.iVal);
         }
         break;
 
         case VT_UI2:
         {
-            result = static_cast<double>(var.uiVal);
+            result = double(var.uiVal);
         }
         break;
 
         case VT_I4:
         {
-            result = static_cast<double>(var.lVal);
+            result = double(var.lVal);
         }
         break;
 
         case VT_UI4:
         {
-            result = static_cast<double>(var.ulVal);
+            result = double(var.ulVal);
         }
         break;
 
         case VT_I8:
         {
-            result = static_cast<double>(var.llVal);
+            result = double(var.llVal);
         }
         break;
 
         case VT_UI8:
         {
-            result = static_cast<double>(var.ullVal);
+            result = double(var.ullVal);
         }
         break;
 

@@ -40,12 +40,13 @@ MainDlg::MainDlg(QApplication* app,
     : m_app{ app }
     , m_config{ config }
     , m_strConfigName{ configName }
-    , m_dnsSD{ MakeShared<DnsSD>() }
+    , m_dnsSD{ MakeShared<DnsSD>(VariantValue::Key("ForceNativeDnsSD").TryGet<bool>(config).value_or(false)) }
     , m_iconShairportQt{ ":/ShairportQt.ico" }
     , m_iconPlay{ ":/play.png" }
     , m_iconPause{ ":/pause.png" }
     , m_handleKeyboardHook{ KeyboardHook::Setup(this) }
     , m_multimediaStateReceiver { std::move(multimediaStateReceiver) }
+    , m_asyncTasks{ 5, true }
 {
     assert(m_app);
     assert(m_multimediaStateReceiver);
@@ -108,6 +109,8 @@ MainDlg::MainDlg(QApplication* app,
             spdlog::error("failed to create to instance memory: {}", instanceName);
         }
     }
+    spdlog::info("DnsSD uses Bonjour: {}", m_dnsSD->UsesAppleBonjour() ? "yes" : "no");
+
     // pre-create pixmap logo
     {
         QImage surface(tr(":/AdShadow.png"));
@@ -732,6 +735,7 @@ void MainDlg::ConfigureSystemTray()
 
             trayIconMenu->addAction(GetString(StringID::MENU_SHOW_APP_WINDOW), [this]()
                 {
+                    PrepareShowWindow();
                     setWindowState(Qt::WindowNoState);
                     
                     // force a hide/show sequence
@@ -784,6 +788,8 @@ void MainDlg::ConfigureSystemTray()
                         }
                         else
                         {
+                            PrepareShowWindow();
+
                             // show the main dialog
                             setWindowState(Qt::WindowNoState);
                             show();
@@ -1034,9 +1040,9 @@ void MainDlg::OnSetCurrentImage(const char* data, size_t dataLen, string&& image
         else
         {
 #if Q_MOC_OUTPUT_REVISION <= 67
-            item = make_unique<ImageQueueItem>(QByteArray{ data, static_cast<int>(dataLen) }, std::move(imageType));
+            item = make_unique<ImageQueueItem>(QByteArray{ data, (int)(dataLen) }, std::move(imageType));
 #else
-            item = make_unique<ImageQueueItem>(QByteArray{ data, static_cast<qsizetype>(dataLen) }, std::move(imageType));
+            item = make_unique<ImageQueueItem>(QByteArray{ data, (qsizetype)(dataLen) }, std::move(imageType));
 #endif
         }
         {
@@ -1250,6 +1256,9 @@ void MainDlg::OnShowMessage(int text)
                 }
                 // terminate the old service
                 raopServer.reset();
+
+                // now, we can safely change the DnsSD method
+                m_dnsSD->SetForceNative(VariantValue::Key("ForceNativeDnsSD").TryGet<bool>(m_config).value_or(false));
 
                 // start new service with the changed config
                 raopServer = make_shared<RaopServer>(m_config, m_dnsSD, this);
@@ -1877,6 +1886,20 @@ void MainDlg::showEvent(QShowEvent* event)
             Minimize();
         }
     }
+    else
+    {
+        if (m_ackShowEvent.load() == 0)
+        {
+            // this is an Event *not* issued by us
+            // so we need to re-issue it correctly
+            m_asyncTasks.emplace_back([this]{
+                this_thread::sleep_for(10ms);
+                spdlog::debug("re-issue ShowWindow Event");
+                ActivateWindow();
+            });
+            return;
+        }
+    }
     emit UpdateWidgets();
     QWidget::showEvent(event);
 }
@@ -1923,10 +1946,23 @@ void MainDlg::OnHideWindow()
 // Widget slot: ActivateWindow
 void MainDlg::OnActivateWindow()
 {
+    PrepareShowWindow();
+
     // show the main dialog
     setWindowState(Qt::WindowNoState);
     show();
     activateWindow();
+}
+
+void MainDlg::PrepareShowWindow()
+{
+    ++m_ackShowEvent;
+
+    m_asyncTasks.emplace_back([this]{
+        this_thread::sleep_for(1s);
+        --m_ackShowEvent;
+        assert(m_ackShowEvent.load() >= 0);
+    });
 }
 
 void MainDlg::OnRequest(RtpEndpoint*, std::unique_ptr<RtpPacket>&& packet)
@@ -2162,6 +2198,7 @@ bool MainDlg::GetTrackInfo(wstring& track, wstring& album, wstring& artist, vect
     return false;
 }
 
+// IMultimediaStateProvider implementation
 void MainDlg::ShowWindow() noexcept
 {
     try
@@ -2204,7 +2241,7 @@ void MainDlg::OnAbout()
     labelPixmap->setPixmap(pixmap.scaled(64, 64));
 
     // search for regular expression "1[., ]+0[., ]+0[., ]+\d"
-    QPointer<QLabel> versionLabel = new QLabel(tr("<p><a href=\"https://github.com/Frank-Friemel/ShairportQt\">ShairportQt</a> 1.0.0.5</p>"));
+    QPointer<QLabel> versionLabel = new QLabel(tr("<p><a href=\"https://github.com/Frank-Friemel/ShairportQt\">ShairportQt</a> 1.0.0.6</p>"));
 
     dlg->connect(versionLabel, &QLabel::linkActivated, [](QString link)
         {
@@ -2520,6 +2557,23 @@ void MainDlg::OnOptions()
     QPointer<QGroupBox> soundDeviceGroup = new QGroupBox(GetString(StringID::LABEL_SOUND_DEVICE));
     soundDeviceGroup->setLayout(soundDeviceLayout);
 
+#ifdef Q_OS_WIN
+    QPointer<QComboBox> dnsSdDropList = new QComboBox;
+
+    dnsSdDropList->addItem(GetString(StringID::LABEL_BONJOUR_IF_AVAILABLE), "bonjour");
+    dnsSdDropList->addItem(GetString(StringID::LABEL_SYSTEM), "system");
+
+    const bool forceNativeDnsSD = VariantValue::Key("ForceNativeDnsSD").TryGet<bool>(m_config).value_or(false);
+    dnsSdDropList->setCurrentIndex(forceNativeDnsSD ? 1 : 0);
+
+    QPointer<QHBoxLayout> dnsSdLayout = new QHBoxLayout(dlg);
+
+    dnsSdLayout->addWidget(dnsSdDropList);
+
+    QPointer<QGroupBox> dnsSdGroup = new QGroupBox(GetString(StringID::LABEL_DNS_SD));
+    dnsSdGroup->setLayout(dnsSdLayout);
+#endif
+
     QPointer<QCheckBox> logToFileOption = new QCheckBox(GetString(StringID::LABEL_LOG_TO_FILE));
     logToFileOption->setCheckState(logToFile ? Qt::CheckState::Checked : Qt::CheckState::Unchecked);
 
@@ -2533,6 +2587,9 @@ void MainDlg::OnOptions()
 
     mainLayout->addWidget(bufferingGroup);
     mainLayout->addWidget(soundDeviceGroup);
+#ifdef Q_OS_WIN    
+    mainLayout->addWidget(dnsSdGroup);
+#endif
     mainLayout->addWidget(logToFileOption);
     mainLayout->addWidget(mediaControlOption);
     mainLayout->addWidget(sysMMControlOption);    
@@ -2547,7 +2604,28 @@ void MainDlg::OnOptions()
         const bool newLogToFile         = logToFileOption->checkState() == Qt::CheckState::Checked;
         const bool newNoMediaControl    = mediaControlOption->checkState() == Qt::CheckState::Checked;
         const bool newSysMediaControl   = sysMMControlOption->checkState() == Qt::CheckState::Checked;
+#ifdef Q_OS_WIN 
+        const bool newForceNativeDnsSD  = dnsSdDropList->currentData().toString().toStdString() == "system"s;
 
+        if (newForceNativeDnsSD != forceNativeDnsSD)
+        {
+            VariantValue::Key("ForceNativeDnsSD").Set(m_config, newForceNativeDnsSD);
+            auto dnsSD = MakeShared<DnsSD>(forceNativeDnsSD);
+            
+            if (dnsSD->SetForceNative(newForceNativeDnsSD))
+            {
+                dnsSD.Clear();
+
+                spdlog::info("Successfully changed DnsSD to {}", newForceNativeDnsSD ? "native" : "bonjour");
+                // restart the RAOP service
+                ShowMessage(StringID::RECONFIG_RAOP_SERVICE);
+            }
+            else
+            {
+                spdlog::info("*Failed* to change DnsSD to {}", newForceNativeDnsSD ? "native" : "bonjour");
+            }
+        }
+#endif
         if (newNoMediaControl != noMediaControl)
         {
             VariantValue::Key("NoMediaControl").Set(m_config, newNoMediaControl);

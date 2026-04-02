@@ -1,0 +1,21 @@
+{
+  "version": "0.2.1",
+  "defaults": {},
+  "configurations": [
+    {
+      "type": "default",
+      "project": "CMakeLists.txt",
+      "projectTarget": "ShairportQtTest.exe",
+      "name": "ShairportQtTest.exe",
+      "args": [
+        "--gtest_filter=*ValuesToDouble*"
+      ]
+    },
+    {
+      "type": "default",
+      "project": "CMakeLists.txt",
+      "projectTarget": "ShairportQt.exe",
+      "name": "ShairportQt.exe"
+    }
+  ]
+}

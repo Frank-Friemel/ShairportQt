@@ -54,12 +54,6 @@ public:
         // override when you call ResolveService
         assert(false);
     }
-
-    virtual void OnServiceQueryRecord(const std::string& host) noexcept
-    {
-        // override when you call ServiceQueryRecord
-        assert(false);
-    }
 };
 
 class DnsSD;
@@ -99,14 +93,19 @@ protected:
     virtual ~DnsSD();
 
 public:
-    DnsSD();
+    DnsSD(bool forceNative);
     
     DnsHandlePtr CreateRaopServiceFromConfig(const SharedPtr<IValueCollection>& config, bool metaInfo);
     DnsHandlePtr BrowseForService(const char* strRegType, IDnsSDEvents* cb);
     DnsHandlePtr ResolveService(uint32_t interfaceIndex,
         const std::string& strService, const std::string& strRegType, const std::string& strReplyDomain, IDnsSDEvents* cb);
-    DnsHandlePtr ServiceQueryRecord(uint32_t interfaceIndex, const std::string& fullname, IDnsSDEvents* cb);
+ 
+    bool UsesAppleBonjour() const noexcept;
+    bool SetForceNative(bool forceNative) noexcept;
 
  protected:
     const std::unique_ptr<Descriptor> m_descriptor;
+#ifdef _WIN32
+    std::atomic_bool m_forceNative;
+#endif
 };

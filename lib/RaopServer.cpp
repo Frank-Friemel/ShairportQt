@@ -7,6 +7,7 @@
 #include "libutils.h"
 #include "definitions.h"
 #include <stdlib.h>
+#include <cmath>
 
 #define CPPHTTPLIB_THREAD_POOL_COUNT 1
 #define CPPHTTPLIB_OPENSSL_SUPPORT
@@ -186,6 +187,11 @@ void RaopServer::Run() noexcept
 				}
 				browseForce = false;
 
+				if (!m_dnsSD->UsesAppleBonjour())
+				{
+					// in this case ... we don't need to query periodically
+					continue;
+				}
 				guard.unlock();
 
 				try
@@ -496,7 +502,8 @@ void RaopServer::Run() noexcept
 										if (i != mapKeyValue.end())
 										{
 											const Variant varVolume = i->second;
-											const int64_t volume = static_cast<uint64_t>(VariantValue::Get<double>(varVolume) * 1000.);
+											const double volVal = VariantValue::Get<double>(varVolume);
+											const int64_t volume = std::llround(volVal * 1000.);
 
 											VariantValue::Key("Volume").Set(m_config, volume);
 										}
@@ -834,29 +841,49 @@ void RaopServer::Run() noexcept
 					spdlog::info("Publishing Raop Service on Port {}", port);
 					VariantValue::Key("RaopPort").Set(m_config, port);
 
-					// Bonjour will publish the service
-					dnsSDHandle = m_dnsSD->CreateRaopServiceFromConfig(m_config, m_metaInfo);
+					bool bSuccess = false;
 
-					// check the result
-					if (!dnsSDHandle->Succeeded())
+					try
 					{
-						// retry in case Bonjour isn't up yet
-						long nTry = 10;
+						// DnsSD will publish the service
+						dnsSDHandle = m_dnsSD->CreateRaopServiceFromConfig(m_config, m_metaInfo);
 
-						do
+						// check the result
+						if (!dnsSDHandle->Succeeded())
 						{
-							if (serverFailed.wait_for(500ms) == future_status::ready)
-							{
-								return dnsSDHandle;
-							}
-							dnsSDHandle = m_dnsSD->CreateRaopServiceFromConfig(m_config, m_metaInfo);
-						} while (!dnsSDHandle->Succeeded() && nTry-- > 0);
-					}
-					const bool bSuccess = dnsSDHandle->Succeeded();
+							// retry in case DnsSD isn't up yet
+							long nTry = 10;
 
+							do
+							{
+								if (serverFailed.wait_for(500ms) == future_status::ready)
+								{
+									return dnsSDHandle;
+								}
+								dnsSDHandle = m_dnsSD->CreateRaopServiceFromConfig(m_config, m_metaInfo);
+							} while (!dnsSDHandle->Succeeded() && nTry-- > 0);
+						}
+						bSuccess = dnsSDHandle->Succeeded();
+					}
+					catch(const exception& e)
+					{
+						spdlog::error("Exception while publishing Raop Service: {}", e.what());
+					}
 					if (!bSuccess)
 					{
 						m_errorState = GetLastError();
+
+						if (m_errorState == ERROR_SUCCESS)
+						{
+							if (dnsSDHandle)
+							{
+								m_errorState = static_cast<uint32_t>(dnsSDHandle->ErrorCode());
+							}
+							if (m_errorState == ERROR_SUCCESS)
+							{
+								m_errorState = ERROR_EXCEPTION_IN_SERVICE;
+							}
+						}
 					}
 					else
 					{
@@ -875,7 +902,7 @@ void RaopServer::Run() noexcept
 					else
 					{
 						spdlog::error("*Failed* to publish RAOP Service \"{}\" with code {}",
-							VariantValue::Key("APname").Get<string>(m_config), dnsSDHandle->ErrorCode());
+							VariantValue::Key("APname").Get<string>(m_config), m_errorState.load());
 					}
 				}
 				return dnsSDHandle;

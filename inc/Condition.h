@@ -5,6 +5,7 @@
 #include <mutex>
 #include <assert.h>
 #include "ICondition.h"
+#include <cmath>
 
 #ifndef INFINITE
 #define INFINITE 0xFFFFFFFF
@@ -61,7 +62,7 @@ namespace ShairportQT
                 if (ms != INFINITE)
                 {
                     const auto stop = std::chrono::steady_clock::now();
-                    const uint32_t diff = static_cast<uint32_t>((double)(std::chrono::duration_cast<std::chrono::microseconds>(stop - start).count()) / (double)1000);
+                    const uint32_t diff = (uint32_t)std::lround(double(std::chrono::duration_cast<std::chrono::microseconds>(stop - start).count()) / 1000.);
 
                     if (ms > diff)
                     {

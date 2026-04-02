@@ -75,6 +75,7 @@ private:
     
     QString GetString(int id) const;
     std::string GetAutoStartConfig() const;
+    void PrepareShowWindow();
 
 protected:
     // implemenation of IRaopEvents
@@ -179,6 +180,7 @@ private:
 #endif
     std::atomic_bool                    m_dialogClosed{ false };
     std::atomic_bool                    m_firstShowEvent{ true };
+    std::atomic_int                     m_ackShowEvent{ 0 };
     std::atomic_bool                    m_isHidden{ false };
     std::atomic_bool                    m_isPlaying{ false };
     std::list<std::future<void>>        m_listAsyncOperations;
@@ -253,4 +255,5 @@ private:
     const std::shared_ptr<IMultimediaStateReceiver> m_multimediaStateReceiver;
     std::atomic_int64_t                 m_currentVolume{ 0 };
     ThreadPool                          m_threadSetVolume;
+    ThreadPool                          m_asyncTasks;
 };

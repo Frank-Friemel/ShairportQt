@@ -55,6 +55,62 @@
           "type": "STRING"
         }
       ]
+    },
+    {
+      "name": "arm64-Release",
+      "generator": "Ninja",
+      "configurationType": "RelWithDebInfo",
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": "",
+      "inheritEnvironments": [ "msvc_arm64_x64" ],
+      "variables": [
+        {
+          "name": "VCPKG_TARGET_TRIPLET",
+          "value": "arm64-windows-static",
+          "type": "STRING"
+        },
+        {
+          "name": "VCPKG_CRT_LINKAGE",
+          "value": "static",
+          "type": "STRING"
+        },
+        {
+          "name": "VCPKG_LIBRARY_LINKAGE",
+          "value": "static",
+          "type": "STRING"
+        }
+      ]
+    },
+    {
+      "name": "arm64-Debug",
+      "generator": "Ninja",
+      "configurationType": "Debug",
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "",
+      "buildCommandArgs": "",
+      "ctestCommandArgs": "",
+      "inheritEnvironments": [ "msvc_arm64_x64" ],
+      "variables": [
+        {
+          "name": "VCPKG_TARGET_TRIPLET",
+          "value": "arm64-windows-static",
+          "type": "STRING"
+        },
+        {
+          "name": "VCPKG_CRT_LINKAGE",
+          "value": "static",
+          "type": "STRING"
+        },
+        {
+          "name": "VCPKG_LIBRARY_LINKAGE",
+          "value": "static",
+          "type": "STRING"
+        }
+      ]
     }
   ]
 }

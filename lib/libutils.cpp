@@ -10,6 +10,7 @@
 #include <string.h>
 #include <codecvt>
 #include <cassert>
+#include <cmath>
 
 using namespace std;
 using namespace literals;
@@ -33,7 +34,7 @@ ScopeContext::~ScopeContext()
 
 uint32_t CreateRand(uint32_t nMax /*= numeric_limits<uint32_t>::max()*/)
 {
-	return static_cast<uint32_t>((static_cast<double>(nMax) * static_cast<double>(rand())) / static_cast<double>(RAND_MAX));
+	return (uint32_t)std::lround((double(nMax) * double(rand())) / double(RAND_MAX));
 }
 
 vector<unsigned char> DecodeFromHex(const string& str)

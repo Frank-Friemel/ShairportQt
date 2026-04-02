@@ -138,6 +138,15 @@ namespace Localization::English
 		case StringID::LABEL_DEFAULT_DEVICE:
 			return "System default Device"s;
 
+		case StringID::LABEL_DNS_SD:
+			return "Service Discovery"s;
+
+		case StringID::LABEL_SYSTEM:
+			return "System"s;
+
+		case StringID::LABEL_BONJOUR_IF_AVAILABLE:
+			return "Apple Bonjour, if available"s;
+
 		case StringID::LABEL_KEEP_STICKY:
 			return "keep Window sticky"s;
 

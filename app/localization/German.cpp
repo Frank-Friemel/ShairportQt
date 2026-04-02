@@ -133,6 +133,9 @@ namespace Localization::German
 		case StringID::LABEL_DEFAULT_DEVICE:
 			return "wie im System eingestellt"s;		
 
+		case StringID::LABEL_BONJOUR_IF_AVAILABLE:
+			return "Apple Bonjour, falls verf"s + CW2AEX(L"\xfc"s) + "gbar"s;
+			
 		case StringID::LABEL_KEEP_STICKY:
 			return "Fenster im Vordergrund"s;		
 

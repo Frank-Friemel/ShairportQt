@@ -12,7 +12,7 @@ typedef struct structDacpID
 	std::string		hostName;
 	std::string		remoteIP;
 	std::string		activeRemote;
-	uint16_t		port{ 0 };
+	uint16_t		port{ 0 }; // network order
 } DacpID;
 
 typedef struct structDmapInfo

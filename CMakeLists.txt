@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15.0)
-project(ShairportQt VERSION 1.0.0.5 LANGUAGES CXX)
+project(ShairportQt VERSION 1.0.0.6 LANGUAGES CXX)
 
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
@@ -121,7 +121,8 @@ if (NOT(CMAKE_BUILD_TYPE MATCHES ".*MinSize.*") AND NOT(CMAKE_BUILD_TYPE MATCHES
                         test/EndpointTest.cpp 
                         test/TrimTest.cpp
                         test/QueueTest.cpp
-                        test/NetworkingTest.cpp)
+                        test/NetworkingTest.cpp
+                        test/ValueTest.cpp)
 
     add_executable(ShairportQtTest ${TEST_SOURCES})
 

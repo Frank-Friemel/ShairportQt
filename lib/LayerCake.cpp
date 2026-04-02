@@ -254,6 +254,11 @@ BSTR SysAllocStringLen(const OLECHAR* psz, size_t len_in_chars)
     return result;
 }
 
+size_t SysStringLen(BSTR strVal)
+{
+    return wcslen(strVal);
+}
+
 HRESULT CreateStreamOnHGlobal(HGLOBAL hGlobal, BOOL fDeleteOnRelease, LPSTREAM* ppstm)
 {
     assert(!hGlobal);
@@ -1662,6 +1667,32 @@ bool GetComputerNameA(char* lpBuffer, uint32_t* nSize)
         *nSize = static_cast<uint32_t>(strlen(lpBuffer));
     }
     return result;
+}
+
+bool GetComputerNameW(wchar_t* lpBuffer, uint32_t* nSizeChars)
+{
+    assert(nSizeChars);
+    char buf[8192];
+    uint32_t size = 8192;
+
+    if (GetComputerNameA(buf, &size))
+    {
+        try
+        {
+            const auto s = CA2WEX(std::string(buf, size));
+
+            if (*nSizeChars > s.length())
+            {
+                *nSizeChars = static_cast<uint32_t>(s.length());
+                memcpy(lpBuffer, s.c_str(), ((*nSizeChars)+1) * sizeof(wchar_t));
+                return true;
+            }
+        }
+        catch(...)
+        {
+        }
+    }
+    return false;
 }
 
 bool DeleteFileA(const char* lpFileName)

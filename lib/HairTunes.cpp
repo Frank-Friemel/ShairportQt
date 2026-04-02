@@ -808,9 +808,9 @@ int16_t HairTunes::ApplyVolumeToChannel(const int16_t in, const double lfVolume,
         e = 0;
         return 0;
     }
-    const double qOut = (static_cast<double>(in) * lfVolume) + e;
-    const int16_t out = static_cast<int16_t>(floor(qOut + 0.5));
-    e = qOut - static_cast<double>(out);
+    const double qOut = ((double(in)) * lfVolume) + e;
+    const int16_t out = int16_t(floor(qOut + 0.5));
+    e = qOut - (double(out));
     return out;
 }
 
