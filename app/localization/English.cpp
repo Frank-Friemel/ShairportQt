@@ -159,6 +159,24 @@ namespace Localization::English
 		case StringID::MENU_SHOW_TRACK_INFO_IN_TRAY:
 			return "&Show \"Now Playing\" in Tray"s;
 
+		case StringID::ACCESSIBLE_PREV_TRACK:
+			return "Previous track"s;
+
+		case StringID::ACCESSIBLE_NEXT_TRACK:
+			return "Next track"s;
+
+		case StringID::ACCESSIBLE_PLAY:
+			return "Play"s;
+
+		case StringID::ACCESSIBLE_PAUSE:
+			return "Pause"s;
+
+		case StringID::ACCESSIBLE_VOLUME_DOWN:
+			return "Volume down"s;
+
+		case StringID::ACCESSIBLE_VOLUME_UP:
+			return "Volume up"s;
+
 		}
 		throw runtime_error("undefined string-id");
 	}

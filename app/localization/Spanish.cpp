@@ -144,6 +144,24 @@ namespace Localization::Spanish
 		case StringID::MENU_SHOW_TRACK_INFO_IN_TRAY:
 			return "&Mostrar \"Reproduciendo\" en la bandeja"s;
 
+		case StringID::ACCESSIBLE_PREV_TRACK:
+			return "Pista anterior"s;
+
+		case StringID::ACCESSIBLE_NEXT_TRACK:
+			return "Pista siguiente"s;
+
+		case StringID::ACCESSIBLE_PLAY:
+			return "Reproducir"s;
+
+		case StringID::ACCESSIBLE_PAUSE:
+			return "Pausar"s;
+
+		case StringID::ACCESSIBLE_VOLUME_DOWN:
+			return "Bajar volumen"s;
+
+		case StringID::ACCESSIBLE_VOLUME_UP:
+			return "Subir volumen"s;
+
 		}
 		return English::GetString(id);
 	}

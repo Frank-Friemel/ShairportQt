@@ -148,6 +148,24 @@ namespace Localization::German
 		case StringID::MENU_SHOW_TRACK_INFO_IN_TRAY:
 			return "\"Aktuelle Titel - Info\" in der &Tray anzeigen"s;
 
+		case StringID::ACCESSIBLE_PREV_TRACK:
+			return "Vorheriger Titel"s;
+
+		case StringID::ACCESSIBLE_NEXT_TRACK:
+			return "N"s + CW2AEX(L"\xe4"s) + "chster Titel"s;
+
+		case StringID::ACCESSIBLE_PLAY:
+			return "Abspielen"s;
+
+		case StringID::ACCESSIBLE_PAUSE:
+			return "Pause"s;
+
+		case StringID::ACCESSIBLE_VOLUME_DOWN:
+			return "Leiser"s;
+
+		case StringID::ACCESSIBLE_VOLUME_UP:
+			return "Lauter"s;
+
 		}
 		return English::GetString(id);
 	}

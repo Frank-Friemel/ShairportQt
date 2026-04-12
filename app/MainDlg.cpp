@@ -678,6 +678,7 @@ void MainDlg::WidgetCreateMultimediaControlGroup()
     m_buttonVolumeDown->setEnabled(false);
     m_buttonVolumeUp->setEnabled(false);
     m_buttonPlayPauseTrack->setEnabled(false);
+    UpdateMultimediaControlAccessibleNames();
 
     QPointer<QHBoxLayout> mmLayout = new QHBoxLayout;
     QPointer<QHBoxLayout> skipLayout = new QHBoxLayout;
@@ -697,6 +698,15 @@ void MainDlg::WidgetCreateMultimediaControlGroup()
     m_groupBoxMultimediaControl = new QGroupBox;
     m_groupBoxMultimediaControl->setSizePolicy(QSizePolicy::Policy::Expanding, QSizePolicy::Policy::Fixed);
     m_groupBoxMultimediaControl->setLayout(mmLayout);
+}
+
+void MainDlg::UpdateMultimediaControlAccessibleNames()
+{
+    m_buttonPreviousTrack->setAccessibleName(GetString(StringID::ACCESSIBLE_PREV_TRACK));
+    m_buttonNextTrack->setAccessibleName(GetString(StringID::ACCESSIBLE_NEXT_TRACK));
+    m_buttonPlayPauseTrack->setAccessibleName(GetString(m_isPlaying.load() ? StringID::ACCESSIBLE_PAUSE : StringID::ACCESSIBLE_PLAY));
+    m_buttonVolumeDown->setAccessibleName(GetString(StringID::ACCESSIBLE_VOLUME_DOWN));
+    m_buttonVolumeUp->setAccessibleName(GetString(StringID::ACCESSIBLE_VOLUME_UP));
 }
 
 void MainDlg::ConfigureSystemTray()
@@ -1320,6 +1330,7 @@ void MainDlg::OnPlayState(bool isPlaying)
     {
         m_buttonPlayPauseTrack->setIcon(m_iconPlay);
     }
+    UpdateMultimediaControlAccessibleNames();
     if (wasPlaying != isPlaying)
     {
         m_multimediaStateReceiver->OnUpdatePlayState(isPlaying);
@@ -1667,6 +1678,7 @@ void MainDlg::OnUpdateWidgets()
         m_buttonVolumeUp->setToolTip(emtpy);
         m_buttonPlayPauseTrack->setToolTip(emtpy);
     }
+    UpdateMultimediaControlAccessibleNames();
     m_editNameAirport->setText(VariantValue::Key("APname").Get<string>(m_config).c_str());
     m_editPasswordAirport->setText(VariantValue::Key("Password").Get<string>(m_config).c_str());
     m_checkboxEnabledTitleInfo->setChecked(!VariantValue::Key("NoMetaInfo").TryGet<bool>(m_config).value_or(false));

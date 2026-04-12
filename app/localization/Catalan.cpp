@@ -144,6 +144,24 @@ namespace Localization::Catalan
 		case StringID::MENU_SHOW_TRACK_INFO_IN_TRAY:
 			return "&Mostra \"Reproduïnt\" a la safata"s;
 
+		case StringID::ACCESSIBLE_PREV_TRACK:
+			return "Pista anterior"s;
+
+		case StringID::ACCESSIBLE_NEXT_TRACK:
+			return "Pista seguent"s;
+
+		case StringID::ACCESSIBLE_PLAY:
+			return "Reproduir"s;
+
+		case StringID::ACCESSIBLE_PAUSE:
+			return "Pausar"s;
+
+		case StringID::ACCESSIBLE_VOLUME_DOWN:
+			return "Abaixar volum"s;
+
+		case StringID::ACCESSIBLE_VOLUME_UP:
+			return "Apujar volum"s;
+
 		}
 		return English::GetString(id);
 	}
