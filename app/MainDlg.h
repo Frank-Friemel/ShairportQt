@@ -66,6 +66,7 @@ private:
     void WidgetCreateAirportGroup();
     void WidgetCreateTitleInfoGroup();
     void WidgetCreateMultimediaControlGroup();
+    void UpdateMultimediaControlAccessibleNames();
     
     void ConfigureDacpBrowser();
     void ConfigureSystemTray();
