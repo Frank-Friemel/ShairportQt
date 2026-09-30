@@ -387,7 +387,7 @@ void RaopServer::Run() noexcept
 
 									for (long i = 0; i < 20; ++i)
 									{
-										nonce[i] = 'A' + static_cast<char>(CreateRand(26));
+										nonce[i] = 'A' + static_cast<char>(CreateRand(25));
 									}
 									string strNonceDigest = httplib::detail::MD5_EX({ nonce, 20 }, true);
 
