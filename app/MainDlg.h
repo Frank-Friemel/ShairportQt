@@ -188,7 +188,8 @@ private:
     DnsHandlePtr                        m_dacpBrowser;
     std::shared_ptr<RaopServer>         m_raopServer;
     std::unique_ptr<std::thread>        m_scheduler;
-    
+    std::string                         m_shade;
+
     // Qt Widgets
     // Menu
     // read about the Qt Object Model: https://doc.qt.io/qt-6/object.html

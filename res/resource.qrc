@@ -6,6 +6,11 @@
         <file>settings-16.ico</file>
         <file>exit-16.ico</file>
         <file>info-16.ico</file>
+        <file>minimize-16.ico</file>
+        <file>settings_light-16.ico</file>
+        <file>exit_light-16.ico</file>
+        <file>info_light-16.ico</file>
+        <file>minimize_light-16.ico</file>
         <file>play.png</file>
         <file>pause.png</file>
         <file>skip_to_next.png</file>
@@ -14,8 +19,6 @@
         <file>volume_up.png</file>
         <file>ArtShadow.png</file>
         <file>AdShadow.png</file>
-        <file>info-16.ico</file>
-        <file>minimize-16.ico</file>
         <file>minimize.png</file>
     </qresource>
 </RCC>
