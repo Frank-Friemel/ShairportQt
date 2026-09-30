@@ -745,8 +745,38 @@ void MainDlg::ConfigureSystemTray()
             if (WinToast::isCompatible() && VariantValue::Key("UseWinToast").TryGet<bool>(m_config).value_or(true))
             {
                 WinToast::instance()->setAppName(L"Shairport");
-                WinToast::instance()->setAppUserModelId(WinToast::configureAUMI(L"Airplay"s, L"Shairport"s, L"Audio"s, L"1.0"s));
-                
+                WinToast::instance()->setAppUserModelId(L"Airplay.Shairport.1.0"s);
+
+                {
+                    constexpr auto shortcutTemplate = L"%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Shairport.lnk";
+                    wstring shortcutPath;
+
+                    const DWORD size = ::ExpandEnvironmentStringsW(shortcutTemplate, nullptr, 0);
+
+                    if (size > 0)
+                    {
+                        shortcutPath.resize(size);
+
+                        if (::ExpandEnvironmentStringsW(shortcutTemplate, shortcutPath.data(), size) == size)
+                        {
+                            shortcutPath.resize(size - 1); // drop terminating null
+                        }
+                        else
+                        {
+                            shortcutPath.clear();
+                        }
+                    }
+
+                    if (!shortcutPath.empty() &&
+                        ::GetFileAttributesW(shortcutPath.c_str()) == INVALID_FILE_ATTRIBUTES &&
+                        ::GetLastError() == ERROR_FILE_NOT_FOUND)
+                    {
+                        WinToast::instance()->createShortcut();
+                    }
+                }
+                // must be set after createShortcut(), which refuses to create a link unless the policy is SHORTCUT_POLICY_REQUIRE_CREATE
+                WinToast::instance()->setShortcutPolicy(WinToast::SHORTCUT_POLICY_IGNORE);
+
                 if (!WinToast::instance()->initialize())
                 {
                     spdlog::error("failed to initialize WinToast");
@@ -1392,6 +1422,12 @@ void MainDlg::OnUpdateTray()
             if ((!m_strCurrentTrack.isEmpty() || !m_strCurrentArtist.isEmpty()) &&
                 (m_strCurrentTrack != m_strCurrentTrackInTray || m_strCurrentArtist != m_strCurrentArtistInTray))
             {
+#ifdef Q_OS_WIN
+                if (m_bUseWinToast)
+                {
+                    WinToast::instance()->clear();
+                }
+#endif
                 m_strCurrentTrackInTray = m_strCurrentTrack;
                 m_strCurrentArtistInTray = m_strCurrentArtist;
 
