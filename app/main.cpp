@@ -253,9 +253,33 @@ static SharedPtr<IValueCollection> LoadConfig()
 
         if (error != ERROR_FILE_NOT_FOUND)
         {
-            spdlog::error("Failed to load config: {}", error);
+            spdlog::error("Failed to load config: {} from file {}", error, configPath);
             assert(false);
         }
+#ifdef _WIN32
+        string configDataHex;
+
+        if (GetValueFromRegistry(HKEY_CURRENT_USER, "config", configDataHex))
+        {
+            if (error == ERROR_FILE_NOT_FOUND)
+            {
+                spdlog::error("Config file not found. Load fom registry instead");
+            }
+            const auto configData = DecodeFromHex(configDataHex);
+
+            configStream->InitFromMemory(configData.size(), configData.data());
+
+            if (!FromJson(config, configStream))
+            {
+                spdlog::error("Failed to parse config: {}", Stringify<string>(configStream));
+                assert(false);
+            }
+            else
+            {
+                spdlog::info("Succeeded to load config from registry");
+            }
+        }
+#endif
     }
     return config;
 }
@@ -271,12 +295,28 @@ static void SaveConfig(const SharedPtr<IValueCollection>& config)
     else
     {
         const auto configPath = GetConfigPath();
-        const auto newConfigfile = configPath + ".new"s;
+        const auto newConfigfile = configPath + "."s + to_string(CreateRand()) + "_"s + to_string(CreateRand());
 
         if (!configStream->ToFile(newConfigfile))
         {
-            spdlog::error("Failed (error: {}) to write new config: {}", GetLastError(), Stringify<string>(configStream));
+            spdlog::error("Failed (error: {}) to write new config: {} to file {}", GetLastError(),
+                Stringify<string>(configStream), newConfigfile);
             DeleteFileA((newConfigfile).c_str());
+#ifdef _WIN32
+            const auto configData = configStream->GetBuffer();
+            const auto configDataHex = EncodeToHex(configData);
+
+            if (!PutValueToRegistry(HKEY_CURRENT_USER, "config", configDataHex.c_str()))
+            {
+                spdlog::error("Failed (error: {}) to write new config: {} to registry", GetLastError(),
+                    Stringify<string>(configStream));
+            }
+            else
+            {
+                DeleteFileA(configPath.c_str());
+                spdlog::info("Succeeded to write new config to registry");
+            }
+#endif
         }
         else
         {
@@ -291,6 +331,10 @@ static void SaveConfig(const SharedPtr<IValueCollection>& config)
                     newConfigfile, configPath);
             }
 #ifdef _WIN32
+            else
+            {
+                RemoveValueFromRegistry(HKEY_CURRENT_USER, "config");
+            }
             if (!::SetFileAttributesA(configPath.c_str(), FILE_ATTRIBUTE_HIDDEN))
             {
                 spdlog::error("Failed (error: {}) to set config hidden", GetLastError());

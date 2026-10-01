@@ -111,6 +111,19 @@ MainDlg::MainDlg(QApplication* app,
     }
     spdlog::info("DnsSD uses Bonjour: {}", m_dnsSD->UsesAppleBonjour() ? "yes" : "no");
 
+    {
+        const QColor col = palette().color(QPalette::ColorRole::Window);
+        int r = 0;
+        int g = 0;
+        int b = 0;
+        col.getRgb(&r, &g, &b);
+
+        if (r < 100 && g < 100 && b < 100)
+        {
+            m_shade = "_light"s;
+        }
+    }
+
     // pre-create pixmap logo
     {
         QImage surface(tr(":/AdShadow.png"));
@@ -122,7 +135,7 @@ MainDlg::MainDlg(QApplication* app,
         QPainter painter(&surface);
 
         painter.setRenderHint(QPainter::RenderHint::Antialiasing);
-        painter.setBrush(Qt::gray);
+        painter.setBrush(palette().color(QPalette::ColorRole::Button));
         painter.drawRoundedRect(m_rectAlbumArt, 8, 8);
         painter.drawPixmap(m_rectAlbumArt, pm.scaled(m_rectAlbumArt.width(), m_rectAlbumArt.height()));
         painter.end();
@@ -438,14 +451,14 @@ void MainDlg::CreateMenuBar()
 #else
     const QKeySequence quitShortcutSequence(QKeySequence::StandardKey::Quit);
 #endif
-    fileMenu->addAction(QIcon(":/minimize-16.ico"), strMinimize, this, &MainDlg::Minimize);
-    fileMenu->addAction(QIcon(":/exit-16.ico"), strQuit, this, &MainDlg::OnQuit, quitShortcutSequence);
+    fileMenu->addAction(QIcon(QString::fromStdString(":/minimize"s + m_shade + "-16.ico"s)), strMinimize, this, &MainDlg::Minimize);
+    fileMenu->addAction(QIcon(QString::fromStdString(":/exit"s + m_shade + "-16.ico"s)), strQuit, this, &MainDlg::OnQuit, quitShortcutSequence);
 
     QPointer<QMenu> editMenu = new QMenu(GetString(StringID::MENU_EDIT), this);
-    editMenu->addAction(QIcon(":/settings-16.ico"), GetString(StringID::MENU_OPTIONS), this, &MainDlg::OnOptions);
+    editMenu->addAction(QIcon(QString::fromStdString(":/settings"s + m_shade + "-16.ico"s)), GetString(StringID::MENU_OPTIONS), this, &MainDlg::OnOptions);
 
     QPointer<QMenu> helpMenu = new QMenu(GetString(StringID::MENU_HELP), this);
-    helpMenu->addAction(QIcon(":/info-16.ico"),GetString( StringID::MENU_ABOUT), this, &MainDlg::OnAbout);
+    helpMenu->addAction(QIcon(QString::fromStdString(":/info"s + m_shade + "-16.ico"s)),GetString( StringID::MENU_ABOUT), this, &MainDlg::OnAbout);
 
     m_menuBar->addMenu(fileMenu);
     m_menuBar->addMenu(editMenu);
@@ -454,6 +467,12 @@ void MainDlg::CreateMenuBar()
 
 void MainDlg::WidgetCreateStatusGroup()
 {
+    const QColor col = palette().color(QPalette::ColorRole::Highlight);
+    int r = 0;
+    int g = 0;
+    int b = 0;
+    col.getRgb(&r, &g, &b);
+
     QPointer<QHBoxLayout> layout = new QHBoxLayout;
 
     m_labelStatus = new QLabel;
@@ -461,8 +480,13 @@ void MainDlg::WidgetCreateStatusGroup()
 
     m_buttonMinimize = new QPushButton(QIcon(":/minimize.png"), tr(""));
     m_buttonMinimize->setFlat(true);
-    m_buttonMinimize->setStyleSheet("QPushButton { background-color: transparent; border: 0px }"
-        "QPushButton:hover { background-color: rgba(192, 192, 192, 0.2) }");
+    
+    m_buttonMinimize->setStyleSheet(QString::fromStdString("QPushButton { background-color: transparent; border: 0px }"s +
+        "QPushButton:hover { background-color: rgba("s + 
+        to_string(r) + ","s +
+        to_string(g) + ","s +
+        to_string(b) + ",0.2) }"s));
+
     m_buttonMinimize->setToolTip(GetString(StringID::LABEL_MINIMIZE));
 
     connect(m_buttonMinimize, &QPushButton::clicked, [this]() { Minimize(); });
@@ -721,8 +745,38 @@ void MainDlg::ConfigureSystemTray()
             if (WinToast::isCompatible() && VariantValue::Key("UseWinToast").TryGet<bool>(m_config).value_or(true))
             {
                 WinToast::instance()->setAppName(L"Shairport");
-                WinToast::instance()->setAppUserModelId(WinToast::configureAUMI(L"Airplay"s, L"Shairport"s, L"Audio"s, L"1.0"s));
-                
+                WinToast::instance()->setAppUserModelId(L"Airplay.Shairport.1.0"s);
+
+                {
+                    constexpr auto shortcutTemplate = L"%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Shairport.lnk";
+                    wstring shortcutPath;
+
+                    const DWORD size = ::ExpandEnvironmentStringsW(shortcutTemplate, nullptr, 0);
+
+                    if (size > 0)
+                    {
+                        shortcutPath.resize(size);
+
+                        if (::ExpandEnvironmentStringsW(shortcutTemplate, shortcutPath.data(), size) == size)
+                        {
+                            shortcutPath.resize(size - 1); // drop terminating null
+                        }
+                        else
+                        {
+                            shortcutPath.clear();
+                        }
+                    }
+
+                    if (!shortcutPath.empty() &&
+                        ::GetFileAttributesW(shortcutPath.c_str()) == INVALID_FILE_ATTRIBUTES &&
+                        ::GetLastError() == ERROR_FILE_NOT_FOUND)
+                    {
+                        WinToast::instance()->createShortcut();
+                    }
+                }
+                // must be set after createShortcut(), which refuses to create a link unless the policy is SHORTCUT_POLICY_REQUIRE_CREATE
+                WinToast::instance()->setShortcutPolicy(WinToast::SHORTCUT_POLICY_IGNORE);
+
                 if (!WinToast::instance()->initialize())
                 {
                     spdlog::error("failed to initialize WinToast");
@@ -766,7 +820,7 @@ void MainDlg::ConfigureSystemTray()
                 trayIconMenu->actions().at(1)->setChecked(VariantValue::Key("TrayTrackInfo").TryGet<bool>(m_config).value_or(false));
             }
             trayIconMenu->addSeparator();
-            trayIconMenu->addAction(QIcon(":/exit-16.ico"), GetString(StringID::MENU_QUIT), this, &MainDlg::OnQuit);
+            trayIconMenu->addAction(QIcon(QString::fromStdString(":/exit"s + m_shade + "-16.ico"s)), GetString(StringID::MENU_QUIT), this, &MainDlg::OnQuit);
 
             m_systemTray = new QSystemTrayIcon(this);
             m_systemTray->setContextMenu(trayIconMenu);
@@ -1368,6 +1422,12 @@ void MainDlg::OnUpdateTray()
             if ((!m_strCurrentTrack.isEmpty() || !m_strCurrentArtist.isEmpty()) &&
                 (m_strCurrentTrack != m_strCurrentTrackInTray || m_strCurrentArtist != m_strCurrentArtistInTray))
             {
+#ifdef Q_OS_WIN
+                if (m_bUseWinToast)
+                {
+                    WinToast::instance()->clear();
+                }
+#endif
                 m_strCurrentTrackInTray = m_strCurrentTrack;
                 m_strCurrentArtistInTray = m_strCurrentArtist;
 
@@ -2253,7 +2313,7 @@ void MainDlg::OnAbout()
     labelPixmap->setPixmap(pixmap.scaled(64, 64));
 
     // search for regular expression "1[., ]+0[., ]+0[., ]+\d"
-    QPointer<QLabel> versionLabel = new QLabel(tr("<p><a href=\"https://github.com/Frank-Friemel/ShairportQt\">ShairportQt</a> 1.0.0.6</p>"));
+    QPointer<QLabel> versionLabel = new QLabel(tr("<p><a href=\"https://github.com/Frank-Friemel/ShairportQt\">ShairportQt</a> 1.0.0.7</p>"));
 
     dlg->connect(versionLabel, &QLabel::linkActivated, [](QString link)
         {

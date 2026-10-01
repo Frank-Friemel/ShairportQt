@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15.0)
-project(ShairportQt VERSION 1.0.0.6 LANGUAGES CXX)
+project(ShairportQt VERSION 1.0.0.7 LANGUAGES CXX)
 
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
@@ -83,12 +83,19 @@ add_executable(ShairportQt ${APP_SOURCES} ${APP_RESOURCE})
 if (MSVC)
     # we apply the static CRT for MSVC
     set_property(TARGET ShairportQt PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    message(STATUS "Build-Type: ${CMAKE_BUILD_TYPE} in folder: ${CMAKE_CURRENT_SOURCE_DIR}")
     if (CMAKE_BUILD_TYPE MATCHES ".*Rel.*")
+        message(STATUS "We'll create a Windows-App")
         # this magic setting makes our app native to Windows (just for Release builds)
         # otherwise we'll create a "console" app
         set_target_properties(ShairportQt PROPERTIES WIN32_EXECUTABLE ON)
+    else()
+        message(STATUS "We'll create a Console-App")
     endif()
+    # C++/WinRT must use standard coroutines (C++20) to match the coroutine ABI of the Qt libraries
+    set_property(TARGET ShairportQt PROPERTY CXX_STANDARD 20)
     # dismiss several warnings
+    target_compile_definitions(ShairportQt PUBLIC _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS=1)
     target_compile_options(ShairportQt PRIVATE -wd4996)
 else()
     # dismiss several warnings

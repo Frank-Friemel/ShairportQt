@@ -6,11 +6,11 @@
 ;   2. Copy ShairportQt.exe into the same directory as this .iss file,
 ;      OR set the SourceDir define below to your build output directory.
 ;   3. Open this file in the Inno Setup IDE and click Build > Compile,
-;      OR run: iscc.exe windows\ShairportQt.iss
+;      OR run: iscc.exe windows_arm64\ShairportQt.iss
 ;   The installer will be written to windows\Output\ShairportQt_Setup_<version>.exe
 
 #define AppName      "ShairportQt"
-#define AppVersion   "1.0.0.6"
+#define AppVersion   "1.0.0.7"
 #define AppPublisher "Frank Friemel"
 #define AppURL       "https://github.com/Frank-Friemel/ShairportQt"
 #define AppExeName   "ShairportQt.exe"
@@ -32,7 +32,7 @@ AppSupportURL={#AppURL}/issues
 AppUpdatesURL={#AppURL}/releases
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
-AllowNoIcons=yes
+DisableProgramGroupPage=yes
 OutputDir=Output
 OutputBaseFilename=ShairportQt_Setup_{#AppVersion}
 SetupIconFile={#IconFile}
@@ -59,10 +59,22 @@ Source: "{#SourceDir}\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 ; Install the icon so shortcuts remain valid after uninstall of Start Menu items
 Source: "{#IconFile}"; DestDir: "{app}"; Flags: ignoreversion
 
+[InstallDelete]
+; Remove stale per-user shortcuts (e.g. created by WinToast) that share the AppUserModelID
+; and would otherwise hide the installer's Start Menu entry and its icon
+Type: files; Name: "{userprograms}\Shairport.lnk"
+Type: files; Name: "{userprograms}\ShairportQT.lnk"
+; Remove the Start Menu folder created by older installer versions
+Type: filesandordirs; Name: "{commonprograms}\{#AppName}"
+
+[UninstallDelete]
+; Shortcut created at runtime by WinToast
+Type: files; Name: "{userprograms}\Shairport.lnk"
+
 [Icons]
-Name: "{group}\{#AppName}";                   Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\ShairportQt.ico"; IconIndex: 0
-Name: "{group}\Uninstall {#AppName}";         Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}";             Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\ShairportQt.ico"; IconIndex: 0; Tasks: desktopicon
+; Start Menu entry (placed directly in the Start Menu's Programs list)
+Name: "{autoprograms}\{#AppName}";            Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\ShairportQt.ico"; IconIndex: 0; Comment: "{#AppName} AirPlay receiver"; AppUserModelID: "Airplay.Shairport.1.0"
+Name: "{autodesktop}\{#AppName}";             Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\ShairportQt.ico"; IconIndex: 0; Tasks: desktopicon; AppUserModelID: "Airplay.Shairport.1.0"
 
 [Registry]
 Root: HKCU; Subkey: "SOFTWARE\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#AppName}"; ValueData: """{app}\{#AppExeName}"""; Tasks: startupicon; Flags: uninsdeletevalue
