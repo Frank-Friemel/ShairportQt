@@ -1,0 +1,78 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "toolchainFile": "${sourceParentDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "VCPKG_CRT_LINKAGE": "static",
+        "VCPKG_LIBRARY_LINKAGE": "static"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "x64-base",
+      "hidden": true,
+      "inherits": "windows-base",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "toolset": {
+        "value": "host=x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static"
+      }
+    },
+    {
+      "name": "arm64-base",
+      "hidden": true,
+      "inherits": "windows-base",
+      "architecture": {
+        "value": "arm64",
+        "strategy": "external"
+      },
+      "toolset": {
+        "value": "host=x64,version=14.52",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "arm64-windows-static"
+      }
+    },
+    {
+      "name": "x64-Debug",
+      "displayName": "x64 Debug",
+      "inherits": "x64-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "x64-Release",
+      "displayName": "x64 Release",
+      "inherits": "x64-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    },
+    {
+      "name": "arm64-Release",
+      "displayName": "arm64 Release",
+      "inherits": "arm64-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "arm64-ReleaseSym",
+      "displayName": "arm64 Release Sym",
+      "inherits": "arm64-base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    }
+  ]
+}
