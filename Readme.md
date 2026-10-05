@@ -79,6 +79,7 @@ When you have issues with `ShairportQt` please provide the following information
 - `qtbase`
 - `WinToast`
 - `gtest`
+- `ffmpeg` (`libavcodec`, `libavutil`, `libswresample`; optional, needed for AirPlay 2 — with vcpkg: `ffmpeg[avcodec,swresample]`, on Debian/Ubuntu: `libavcodec-dev libavutil-dev libswresample-dev pkg-config`)
 
 I recommend to use `vcpkg` in order to get them.
 It works very well on Linux and Windows.
@@ -155,6 +156,25 @@ Example forcing the language to be Japanese:
 ShairportQt integrates its controls into your system. Windows calls this `SMTC`, Linux calls it `MPRIS`. The purpose is the same — allowing the system or other applications to control installed media applications. If you don't need or want this feature, you may disable it by unchecking the checkbox in the `options` dialog.
 
 Please keep in mind that ShairportQt is designed to act as a media server. The client is the device sending the music, which connects to ShairportQt. So if the remote device disconnects its controls from ShairportQt, those controls will also become unavailable to `SMTC`/`MPRIS`.
+
+### AirPlay 2 (experimental)
+
+ShairportQt speaks AirPlay 1 (RAOP) by default. Additionally it can act as an AirPlay 2 audio receiver, which
+uses "buffered audio" — this keeps the stream alive in situations where AirPlay 1 senders drop the connection,
+e.g. when you receive a phone call on your iPhone.
+
+- Enable it in the `options` dialog (`AirPlay 2 (experimental)`) or set `EnableAirPlay2` to `true` in the config.
+- ShairportQt must be built with FFmpeg (see [Building](#building)); otherwise the option is disabled.
+- AirPlay 2 is only offered when **no password** is set (AirPlay 2 password/PIN pairing is not implemented yet).
+- AirPlay 1 keeps working at the same time: older senders continue to use it.
+- For precise timing AirPlay 2 uses PTP on UDP ports 319/320. These are privileged ports on Linux; without access
+  ShairportQt falls back to local timing (playback works, but isn't sample-synchronized with other speakers).
+  To allow it: `sudo setcap cap_net_bind_service=+ep /path/to/ShairportQt`. Note that PTP ports can only
+  be used by one program at a time (e.g. not together with `shairport-sync`/`nqptp`).
+- Your firewall needs to allow incoming TCP/UDP connections to ShairportQt (dynamic ports).
+
+What's implemented and what could be added later is documented in [`doc/AirPlay2.md`](doc/AirPlay2.md)
+and [`doc/AirPlay2-OptionalFeatures.md`](doc/AirPlay2-OptionalFeatures.md).
 
 ### Avahi (aka Bonjour)
 

@@ -28,6 +28,41 @@ set(LIBRARY_SOURCES lib/dnssd.cpp lib/RaopServer.cpp lib/LayerCake.cpp lib/base6
         lib/audio/AlsaAudio.cpp lib/audio/AudioPlayer.cpp lib/SuspendInhibitor.cpp lib/Networking.cpp
         lib/DmapParser.cpp lib/KeyboardHook.cpp)
 
+# AirPlay 2 sources
+set(AIRPLAY2_SOURCES lib/airplay2/Ap2Crypto.cpp lib/airplay2/Tlv8.cpp lib/airplay2/Plist.cpp
+        lib/airplay2/Srp.cpp lib/airplay2/Pairing.cpp lib/airplay2/SecureChannel.cpp
+        lib/airplay2/PtpClock.cpp lib/airplay2/Ap2Decoder.cpp lib/airplay2/Ap2AudioSession.cpp
+        lib/airplay2/AirPlay2Handler.cpp)
+list(APPEND LIBRARY_SOURCES ${AIRPLAY2_SOURCES})
+
+# FFmpeg (libavcodec, libavutil, libswresample) is needed to decode AirPlay 2 audio (AAC / ALAC)
+option(SHAIRPORT_WITH_FFMPEG "Enable AirPlay 2 audio decoding with FFmpeg" ON)
+set(SHAIRPORT_FFMPEG_FOUND OFF)
+if (SHAIRPORT_WITH_FFMPEG)
+    if (UNIX)
+        find_package(PkgConfig)
+        if (PkgConfig_FOUND)
+            pkg_check_modules(FFMPEG IMPORTED_TARGET libavcodec libavutil libswresample)
+            if (FFMPEG_FOUND)
+                set(SHAIRPORT_FFMPEG_FOUND ON)
+            endif()
+        endif()
+    else()
+        # vcpkg: ffmpeg[avcodec,swresample]
+        find_package(FFMPEG)
+        if (FFMPEG_FOUND)
+            set(SHAIRPORT_FFMPEG_FOUND ON)
+        endif()
+    endif()
+endif()
+if (SHAIRPORT_FFMPEG_FOUND)
+    message(STATUS "FFmpeg found: AirPlay 2 support enabled")
+elseif (SHAIRPORT_WITH_FFMPEG)
+    message(WARNING "FFmpeg not found: AirPlay 2 support will be disabled")
+else()
+    message(STATUS "SHAIRPORT_WITH_FFMPEG is OFF: AirPlay 2 support disabled")
+endif()
+
 add_library(ShairLib STATIC ${LIBRARY_SOURCES})
 if (MSVC)
     # we apply the static CRT for MSVC
@@ -41,6 +76,17 @@ endif()
 target_include_directories(ShairLib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc")
 target_include_directories(ShairLib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/lib/Bonjour")
 target_link_libraries(ShairLib PRIVATE spdlog::spdlog spdlog::spdlog_header_only)
+target_link_libraries(ShairLib PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+if (SHAIRPORT_FFMPEG_FOUND)
+    target_compile_definitions(ShairLib PRIVATE SHAIRPORT_HAS_FFMPEG=1)
+    if (UNIX)
+        target_link_libraries(ShairLib PUBLIC PkgConfig::FFMPEG)
+    else()
+        target_include_directories(ShairLib PRIVATE ${FFMPEG_INCLUDE_DIRS})
+        target_link_directories(ShairLib PUBLIC ${FFMPEG_LIBRARY_DIRS})
+        target_link_libraries(ShairLib PUBLIC ${FFMPEG_LIBRARIES})
+    endif()
+endif()
 target_include_directories(ShairLib PRIVATE ${SOCKPP_INCLUDE_DIRS})
 if (UNIX)
     target_link_libraries(ShairLib PRIVATE Qt${QT_VERSION_MAJOR}::DBus)
@@ -129,7 +175,8 @@ if (NOT(CMAKE_BUILD_TYPE MATCHES ".*MinSize.*") AND NOT(CMAKE_BUILD_TYPE MATCHES
                         test/TrimTest.cpp
                         test/QueueTest.cpp
                         test/NetworkingTest.cpp
-                        test/ValueTest.cpp)
+                        test/ValueTest.cpp
+                        test/AirPlay2Test.cpp)
 
     add_executable(ShairportQtTest ${TEST_SOURCES})
 
@@ -146,6 +193,7 @@ if (NOT(CMAKE_BUILD_TYPE MATCHES ".*MinSize.*") AND NOT(CMAKE_BUILD_TYPE MATCHES
     target_link_libraries(ShairportQtTest PRIVATE ShairLib)
     target_link_libraries(ShairportQtTest PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     target_link_libraries(ShairportQtTest PRIVATE Sockpp::sockpp-static)
+    target_link_libraries(ShairportQtTest PRIVATE spdlog::spdlog spdlog::spdlog_header_only)
 if (UNIX)
     target_link_libraries(ShairportQtTest PRIVATE asound)
 endif()

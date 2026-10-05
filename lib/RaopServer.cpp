@@ -9,7 +9,9 @@
 #include <stdlib.h>
 #include <cmath>
 
-#define CPPHTTPLIB_THREAD_POOL_COUNT 1
+// several connections may be open at the same time (e.g. AirPlay 2 senders keep their connection open
+// and probe with additional connections); the request handling itself is serialized by m_mtxRequest
+#define CPPHTTPLIB_THREAD_POOL_COUNT 8
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "httplib/httplib_raop.h"
 
@@ -18,11 +20,111 @@
 #include <thread>
 #include <list>
 #include "dnssd.h"
+#include "airplay2/Ap2AudioSession.h"
+#include "airplay2/SecureChannel.h"
 
 using namespace std;
 using namespace literals;
 
 static bool DigestOk(const httplib::Request& request, const string& password);
+
+namespace
+{
+	// state of one RTSP connection
+	struct ConnectionState
+	{
+		std::shared_ptr<AirPlay2::Connection>	airPlay2;
+		bool									airPlay1Session{ false }; // ANNOUNCE or SETUP (AirPlay 1) seen
+	};
+
+	// AirPlay 2 encrypted control channel
+	class EncryptedFilter : public httplib::StreamFilter
+	{
+	public:
+		explicit EncryptedFilter(AirPlay2::SecureChannel&& channel)
+			: m_channel(move(channel))
+		{
+		}
+
+		ssize_t read(httplib::Stream& raw, char* ptr, size_t size) override
+		{
+			while (m_plain.size() == m_offset)
+			{
+				m_plain.clear();
+				m_offset = 0;
+
+				char buffer[4096];
+				const auto n = raw.read(buffer, sizeof(buffer));
+
+				if (n <= 0)
+				{
+					return n;
+				}
+				if (!m_channel.Decrypt(reinterpret_cast<const uint8_t*>(buffer), static_cast<size_t>(n), m_plain))
+				{
+					spdlog::error("AirPlay2: failed to decrypt the control channel");
+					return -1;
+				}
+			}
+			const size_t n = min(size, m_plain.size() - m_offset);
+			memcpy(ptr, m_plain.data() + m_offset, n);
+			m_offset += n;
+			return static_cast<ssize_t>(n);
+		}
+
+		ssize_t write(httplib::Stream& raw, const char* ptr, size_t size) override
+		{
+			string encrypted;
+			m_channel.Encrypt(reinterpret_cast<const uint8_t*>(ptr), size, encrypted);
+
+			size_t offset = 0;
+
+			while (offset < encrypted.size())
+			{
+				const auto n = raw.write(encrypted.data() + offset, encrypted.size() - offset);
+
+				if (n <= 0)
+				{
+					return -1;
+				}
+				offset += static_cast<size_t>(n);
+			}
+			return static_cast<ssize_t>(size);
+		}
+
+		bool has_buffered_data() const override
+		{
+			return m_offset < m_plain.size();
+		}
+
+	private:
+		AirPlay2::SecureChannel	m_channel;
+		string					m_plain;
+		size_t					m_offset{ 0 };
+	};
+
+	shared_ptr<ConnectionState> GetConnectionState(const httplib::Request& request)
+	{
+		if (!request.connection)
+		{
+			return {};
+		}
+		if (!request.connection->user_data)
+		{
+			request.connection->user_data = make_shared<ConnectionState>();
+		}
+		return static_pointer_cast<ConnectionState>(request.connection->user_data);
+	}
+
+	// AirPlay 2 sessions are owned by their connection as well, so they must be stopped explicitly
+	void StopSession(const shared_ptr<IAudioSession>& session) noexcept
+	{
+		if (auto ap2Session = dynamic_pointer_cast<AirPlay2::Ap2AudioSession>(session))
+		{
+			ap2Session->Stop();
+		}
+	}
+}
 
 RaopServer::RaopServer(SharedPtr<IValueCollection> config, SharedPtr<DnsSD> dnsSD, IRaopEvents* raopEvents /*= nullptr*/)
 	: m_srvHttp{ make_unique<httplib::Server>() }
@@ -34,6 +136,7 @@ RaopServer::RaopServer(SharedPtr<IValueCollection> config, SharedPtr<DnsSD> dnsS
 	, m_raopEvents{ raopEvents }
 	, m_metaInfo{ !VariantValue::Key("NoMetaInfo").TryGet<bool>(config).value_or(false) ||
 					VariantValue::Key("ForceMetaInfo").TryGet<bool>(config).value_or(false) }
+	, m_airPlay2{ make_unique<AirPlay2::Service>(config, this) }
 {
 	assert(m_config.IsValid());
 	assert(m_clients.IsValid());
@@ -120,6 +223,50 @@ bool RaopServer::RemoveClient(const string& remoteAddr) noexcept
 		return true;
 	}
 	return false;
+}
+
+void RaopServer::OnSessionStarted(const shared_ptr<AirPlay2::Ap2AudioSession>& session)
+{
+	shared_ptr<IAudioSession> previous;
+	{
+		const lock_guard<shared_mutex> guard(m_mtxDecoder);
+		previous = move(m_decoder);
+		m_decoder = session;
+	}
+	if (previous)
+	{
+		previous->Flush();
+		StopSession(previous);
+	}
+}
+
+void RaopServer::OnSessionEnded(const shared_ptr<AirPlay2::Ap2AudioSession>& session)
+{
+	shared_ptr<IAudioSession> previous;
+	{
+		const lock_guard<shared_mutex> guard(m_mtxDecoder);
+
+		if (m_decoder == session)
+		{
+			previous = move(m_decoder);
+			m_decoder.reset();
+		}
+	}
+	if (previous)
+	{
+		previous->Flush();
+	}
+}
+
+void RaopServer::OnDacp(const string& dacpID, const string& activeRemote, const string& remoteAddr)
+{
+	const string key = dacpID + "|"s + activeRemote + "|"s + remoteAddr;
+
+	if (m_raopEvents && key != m_lastDacp)
+	{
+		m_lastDacp = key;
+		m_raopEvents->OnSetCurrentDacpID(DacpID{ HexToInteger(dacpID), m_hostName, remoteAddr, activeRemote, 0 });
+	}
 }
 
 bool RaopServer::IsPlaying() const noexcept
@@ -311,6 +458,8 @@ void RaopServer::Run() noexcept
 		// setup "get" handler for http
 		m_srvHttp->Get(".+"s, [&](const httplib::Request& request, httplib::Response& response)
 			{
+				const lock_guard<mutex> requestGuard(m_mtxRequest);
+
 				try
 				{
 #if defined(_DEBUG) && defined(_WIN32) && 0
@@ -337,6 +486,68 @@ void RaopServer::Run() noexcept
 					response.set_header("CSeq"s, request.get_header_value("CSeq"s));
 					response.set_header("Audio-Jack-Status"s, "connected; type=analog"s);
 					response.set_header("Server"s, "AirTunes/105.1"s);
+
+					const auto connectionState = GetConnectionState(request);
+
+					if (request.connection_closed_request && connectionState && connectionState->airPlay2)
+					{
+						// the connection has been closed: end its AirPlay 2 session
+						m_airPlay2->OnConnectionClosed(*connectionState->airPlay2);
+					}
+					if (!request.connection_closed_request && connectionState && m_airPlay2->IsEnabled())
+					{
+						if (!connectionState->airPlay2)
+						{
+							connectionState->airPlay2 = m_airPlay2->CreateConnection();
+						}
+						auto& ap2Connection = *connectionState->airPlay2;
+
+						AirPlay2::Request ap2Request;
+						ap2Request.method = request.method;
+						ap2Request.path = request.path;
+						ap2Request.remoteAddr = request.remote_addr;
+						ap2Request.localAddr = request.local_addr;
+
+						for (const auto& header : request.headers)
+						{
+							ap2Request.headers[CopyToLower(header.first)] = header.second;
+						}
+
+						if (m_airPlay2->IsAirPlay2Request(ap2Connection, ap2Request))
+						{
+							if (request.method == "SETUP"s && m_serviceDisabled)
+							{
+								response.status = 503; // Service Unavailable
+								return;
+							}
+							ap2Request.body = request.body;
+
+							AirPlay2::Response ap2Response;
+
+							if (m_airPlay2->Handle(ap2Connection, ap2Request, ap2Response))
+							{
+								response.status = ap2Response.status;
+
+								for (const auto& header : ap2Response.headers)
+								{
+									response.headers.erase(header.first);
+									response.set_header(header.first, header.second);
+								}
+								if (!ap2Response.body.empty() || !ap2Response.contentType.empty())
+								{
+									response.set_content(ap2Response.body, ap2Response.contentType.c_str());
+								}
+								AirPlay2::Bytes secret;
+
+								if (ap2Connection.TakeEncryptionSecret(secret))
+								{
+									// the response is sent unencrypted, everything afterwards is encrypted
+									request.connection->pending_filter = make_shared<EncryptedFilter>(AirPlay2::SecureChannel::ForControl(secret));
+								}
+								return;
+							}
+						}
+					}
 
 					if (request.has_header("Apple-Challenge"s))
 					{
@@ -408,7 +619,14 @@ void RaopServer::Run() noexcept
 					}
 					if (request.method == "OPTIONS"s)
 					{
-						response.set_header("Public"s, "ANNOUNCE, SETUP, RECORD, PAUSE, FLUSH, TEARDOWN, OPTIONS, GET_PARAMETER, SET_PARAMETER, POST, GET"s);
+						if (m_airPlay2->IsEnabled())
+						{
+							response.set_header("Public"s, "ANNOUNCE, SETUP, RECORD, PAUSE, FLUSH, FLUSHBUFFERED, TEARDOWN, OPTIONS, POST, GET, PUT, GET_PARAMETER, SET_PARAMETER, SETPEERS, SETPEERSX, SETRATEANCHORTIME"s);
+						}
+						else
+						{
+							response.set_header("Public"s, "ANNOUNCE, SETUP, RECORD, PAUSE, FLUSH, TEARDOWN, OPTIONS, GET_PARAMETER, SET_PARAMETER, POST, GET"s);
+						}
 					}
 					else if (request.method == "GET_PARAMETER"s)
 					{
@@ -592,6 +810,10 @@ void RaopServer::Run() noexcept
 					}
 					else if (request.method == "ANNOUNCE"s)
 					{
+						if (connectionState)
+						{
+							connectionState->airPlay1Session = true;
+						}
 						map<string, string, httplib::detail::ci> mapKeyValue;
 
 						ParseRegEx(request.body, "a[:space:]*=[:space:]*[^[:space:]:]+[:space:]*:[^\r\n]+[\r\n]+"s
@@ -673,6 +895,10 @@ void RaopServer::Run() noexcept
 					}
 					else if (request.method == "SETUP"s)
 					{
+						if (connectionState)
+						{
+							connectionState->airPlay1Session = true;
+						}
 						auto client = GetClient(request.remote_addr);
 
 						if (client.IsValid())
@@ -717,17 +943,19 @@ void RaopServer::Run() noexcept
 							if (m_decoder)
 							{
 								m_decoder->Flush();
+								StopSession(m_decoder);
 								m_decoder.reset();
 							}
 
 							try
 							{
-								m_decoder = make_unique<HairTunes>(m_config, move(client));
+								auto hairTunes = make_shared<HairTunes>(m_config, move(client));
 								assert(!client.IsValid());
+								m_decoder = hairTunes;
 
-								const unsigned int serverPort = m_decoder->GetServerPort();
-								const unsigned int controlPort = m_decoder->GetControlPort();
-								const unsigned int timingPort = m_decoder->GetTimingPort();
+								const unsigned int serverPort = hairTunes->GetServerPort();
+								const unsigned int controlPort = hairTunes->GetControlPort();
+								const unsigned int timingPort = hairTunes->GetTimingPort();
 
 								const string transportResponse =
 									"RTP/AVP/UDP;unicast;mode=record;server_port="s +
@@ -774,12 +1002,18 @@ void RaopServer::Run() noexcept
 					}
 					else if (request.method == "TEARDOWN"s)
 					{
+						if (request.connection_closed_request && connectionState && !connectionState->airPlay1Session)
+						{
+							// a connection without an AirPlay 1 session has been closed
+							// (don't affect another connection of the same client)
+							return;
+						}
 						if (RemoveClient(request.remote_addr))
 						{
 							response.set_header("Connection"s, "close"s);
 							spdlog::debug("client {} torn down", request.remote_addr);
 						}
-						unique_ptr<HairTunes> decoder;
+						shared_ptr<IAudioSession> decoder;
 						{
 							const lock_guard<shared_mutex> guard(m_mtxDecoder);
 
@@ -791,6 +1025,7 @@ void RaopServer::Run() noexcept
 						if (decoder)
 						{
 							decoder->Flush();
+							StopSession(decoder);
 							decoder.reset();
 						}
 							
@@ -828,10 +1063,11 @@ void RaopServer::Run() noexcept
 		for (; port <= 6000; ++port)
 		{
 			promise<bool> serverFailed;
+			DnsHandlePtr airPlayServiceHandle;
 
 			// since our http-service is blocking
 			// we're publishing the Raop Service asynchronously
-			const auto publishRaopService = async(launch::async, [this](future<bool>&& serverFailed, int port) 
+			const auto publishRaopService = async(launch::async, [this, &airPlayServiceHandle](future<bool>&& serverFailed, int port) 
 			{
 				DnsHandlePtr dnsSDHandle;
 				
@@ -842,11 +1078,13 @@ void RaopServer::Run() noexcept
 					VariantValue::Key("RaopPort").Set(m_config, port);
 
 					bool bSuccess = false;
+					const bool airPlay2 = m_airPlay2->IsEnabled();
+					const DnsSD::TxtRecords raopRecords = airPlay2 ? m_airPlay2->RaopTxtRecords() : DnsSD::TxtRecords{};
 
 					try
 					{
 						// DnsSD will publish the service
-						dnsSDHandle = m_dnsSD->CreateRaopServiceFromConfig(m_config, m_metaInfo);
+						dnsSDHandle = m_dnsSD->CreateRaopServiceFromConfig(m_config, m_metaInfo, raopRecords);
 
 						// check the result
 						if (!dnsSDHandle->Succeeded())
@@ -860,10 +1098,28 @@ void RaopServer::Run() noexcept
 								{
 									return dnsSDHandle;
 								}
-								dnsSDHandle = m_dnsSD->CreateRaopServiceFromConfig(m_config, m_metaInfo);
+								dnsSDHandle = m_dnsSD->CreateRaopServiceFromConfig(m_config, m_metaInfo, raopRecords);
 							} while (!dnsSDHandle->Succeeded() && nTry-- > 0);
 						}
 						bSuccess = dnsSDHandle->Succeeded();
+
+						if (bSuccess && airPlay2)
+						{
+							airPlayServiceHandle = m_dnsSD->CreateAirPlayService(m_config, m_airPlay2->AirPlayTxtRecords());
+
+							if (airPlayServiceHandle->Succeeded())
+							{
+								spdlog::info("Published AirPlay 2 Service");
+							}
+							else
+							{
+								spdlog::error("*Failed* to publish AirPlay 2 Service with code {}", airPlayServiceHandle->ErrorCode());
+							}
+						}
+						else if (!airPlay2 && VariantValue::Key("EnableAirPlay2").TryGet<bool>(m_config).value_or(false))
+						{
+							spdlog::warn("AirPlay 2 is enabled but not available (FFmpeg missing or password protection active)");
+						}
 					}
 					catch(const exception& e)
 					{
@@ -947,7 +1203,7 @@ void RaopServer::Run() noexcept
 	}
 	spdlog::info("Stopped Raop Browser");
 
-	unique_ptr<HairTunes> decoder;
+	shared_ptr<IAudioSession> decoder;
 
 	if (m_decoder)
 	{
@@ -957,6 +1213,7 @@ void RaopServer::Run() noexcept
 	if (decoder)
 	{
 		decoder->Flush();
+		StopSession(decoder);
 		decoder.reset();
 	}
 }

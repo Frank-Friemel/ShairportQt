@@ -5,6 +5,7 @@
 #include <mutex>
 #include "LayerCake.h"
 #include "DmapParser.h"
+#include "airplay2/AirPlay2Handler.h"
 
 typedef struct structDacpID
 {
@@ -42,10 +43,11 @@ namespace Crypto
 }
 
 class DnsSD;
-class HairTunes;
+class IAudioSession;
 
 class RaopServer
 	: protected DmapParser
+	, public AirPlay2::IHost
 {
 	class HttpServer;
 
@@ -74,6 +76,11 @@ protected:
 	// Dmap Parser Callbacks
 	void on_string(void* ctx, const char* code, const char* name, const char* buf, size_t len) override;
 
+	// AirPlay 2 host callbacks
+	void OnSessionStarted(const std::shared_ptr<AirPlay2::Ap2AudioSession>& session) override;
+	void OnSessionEnded(const std::shared_ptr<AirPlay2::Ap2AudioSession>& session) override;
+	void OnDacp(const std::string& dacpID, const std::string& activeRemote, const std::string& remoteAddr) override;
+
 private:
 	SharedPtr<IValueCollection> GetClient(const std::string& remoteAddr, bool create);
 	bool RemoveClient(const std::string& remoteAddr) noexcept;
@@ -88,8 +95,11 @@ private:
 	const SharedPtr<IValueCollection>  		m_config;
 	const SharedPtr<DnsSD> 					m_dnsSD;
 	const std::unique_ptr<Crypto::Rsa> 		m_rsa;
-	std::unique_ptr<HairTunes>				m_decoder;
+	std::shared_ptr<IAudioSession>			m_decoder;
 	mutable std::shared_mutex				m_mtxDecoder;
+	std::mutex								m_mtxRequest;	// serializes the RTSP request handling
+	const std::unique_ptr<AirPlay2::Service> m_airPlay2;
+	std::string								m_lastDacp;
 	std::atomic_bool						m_serviceDisabled;
 	const SharedPtr<IValueCollection>  		m_clients;
 	IRaopEvents* const						m_raopEvents;

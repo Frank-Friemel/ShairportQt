@@ -123,6 +123,9 @@ namespace Localization::English
 		case StringID::LABEL_SOUND_DEVICE:
 			return "Sound Device"s;
 
+		case StringID::LABEL_ENABLE_AIRPLAY2:
+			return "AirPlay 2 (experimental)"s;
+
 		case StringID::LABEL_LOG_TO_FILE:
 			return "Log to file"s;
 

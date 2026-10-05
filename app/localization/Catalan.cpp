@@ -123,6 +123,9 @@ namespace Localization::Catalan
 		case StringID::LABEL_SOUND_DEVICE:
 			return "Dispositiu de So"s;
 
+		case StringID::LABEL_ENABLE_AIRPLAY2:
+			return "AirPlay 2 (experimental)"s;
+
 		case StringID::LABEL_LOG_TO_FILE:
 			return "Guardar registres a fitxer"s;
 

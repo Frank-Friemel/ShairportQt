@@ -2655,6 +2655,13 @@ void MainDlg::OnOptions()
     QPointer<QCheckBox> sysMMControlOption = new QCheckBox(GetString(StringID::LABEL_ENABLE_SYS_MM_CONTROL));
     sysMMControlOption->setCheckState(sysMediaControl ? Qt::CheckState::Checked : Qt::CheckState::Unchecked);
 
+    const bool airPlay2 = VariantValue::Key("EnableAirPlay2").TryGet<bool>(m_config).value_or(false);
+
+    QPointer<QCheckBox> airPlay2Option = new QCheckBox(GetString(StringID::LABEL_ENABLE_AIRPLAY2));
+    airPlay2Option->setCheckState(airPlay2 ? Qt::CheckState::Checked : Qt::CheckState::Unchecked);
+    // AirPlay 2 requires FFmpeg for audio decoding
+    airPlay2Option->setEnabled(AirPlay2::Service::IsSupported());
+
     QPointer<QVBoxLayout> mainLayout = new QVBoxLayout(dlg);
 
     mainLayout->addWidget(bufferingGroup);
@@ -2665,6 +2672,7 @@ void MainDlg::OnOptions()
     mainLayout->addWidget(logToFileOption);
     mainLayout->addWidget(mediaControlOption);
     mainLayout->addWidget(sysMMControlOption);    
+    mainLayout->addWidget(airPlay2Option);
     mainLayout->addWidget(buttonBox);
 
     dlg->setLayout(mainLayout);
@@ -2714,6 +2722,15 @@ void MainDlg::OnOptions()
                 m_multimediaStateReceiver->OnUpdatePlayState(m_isPlaying);
                 m_multimediaStateReceiver->OnUpdateTrackInfo();
             }
+        }
+        const bool newAirPlay2 = airPlay2Option->checkState() == Qt::CheckState::Checked;
+
+        if (newAirPlay2 != airPlay2)
+        {
+            VariantValue::Key("EnableAirPlay2").Set(m_config, newAirPlay2);
+
+            // restart the RAOP service
+            ShowMessage(StringID::RECONFIG_RAOP_SERVICE);
         }
         if (newLogToFile != logToFile)
         {
