@@ -692,6 +692,13 @@ namespace AirPlay2
         {
             params.format.framesPerPacket = static_cast<int>(stream.Get("spf").AsInt(params.format.framesPerPacket));
         }
+        if ((params.format.sampleRate != 44100 && params.format.sampleRate != 48000) ||
+            params.format.framesPerPacket <= 0 || params.format.framesPerPacket > 8192)
+        {
+            spdlog::error("AirPlay2: unsupported stream parameters (sr={}, spf={})", params.format.sampleRate, params.format.framesPerPacket);
+            response.status = 501;
+            return;
+        }
         EndSession(connection);
 
         shared_ptr<Ap2AudioSession> session;

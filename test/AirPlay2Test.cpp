@@ -620,3 +620,80 @@ TEST(AirPlay2, DISABLED_ServeForManualTesting)
     this_thread::sleep_for(chrono::seconds(seconds));
     server.reset();
 }
+
+TEST(AirPlay2, PlistRejectsExponentialExpansion)
+{
+    // objects 0..30: arrays referencing the next object twice, object 31: integer
+    // -> 2^31 nodes if shared references were expanded without limit
+    constexpr int count = 32;
+    Bytes data{ 'b', 'p', 'l', 'i', 's', 't', '0', '0' };
+    vector<uint8_t> offsets;
+
+    for (int i = 0; i < count; ++i)
+    {
+        offsets.push_back(static_cast<uint8_t>(data.size()));
+
+        if (i + 1 < count)
+        {
+            data.insert(data.end(), { 0xA2, static_cast<uint8_t>(i + 1), static_cast<uint8_t>(i + 1) });
+        }
+        else
+        {
+            data.insert(data.end(), { 0x10, 0x01 });
+        }
+    }
+    const uint8_t offsetTable = static_cast<uint8_t>(data.size());
+    data.insert(data.end(), offsets.begin(), offsets.end());
+
+    Bytes trailer(32, 0);
+    trailer[6] = 1;                     // offset size
+    trailer[7] = 1;                     // ref size
+    trailer[15] = count;                // number of objects
+    trailer[23] = 0;                    // top object
+    trailer[31] = offsetTable;          // offset table offset
+    data.insert(data.end(), trailer.begin(), trailer.end());
+
+    const auto start = chrono::steady_clock::now();
+    Plist result;
+    EXPECT_FALSE(Plist::FromBinary(data.data(), data.size(), result));
+    EXPECT_LT(chrono::steady_clock::now() - start, chrono::seconds(1));
+}
+
+TEST(AirPlay2, SetupRejectsInvalidSampleRate)
+{
+    auto config = MakeShared<ValueCollection>();
+    VariantValue::Key("HWaddress").Set(config, vector<uint8_t>{ 0x02, 0x11, 0x22, 0x33, 0x44, 0x55 });
+    VariantValue::Key("APname").Set(config, "Test"s);
+
+    Service service(config, nullptr);
+    auto connection = service.CreateConnection();
+
+    auto stream = Plist::Dict();
+    stream.Set("type", Plist::Integer(96));
+    stream.Set("ct", Plist::Integer(2));
+    stream.Set("sr", Plist::Integer(0));
+    stream.Set("spf", Plist::Integer(352));
+    stream.Set("shk", Plist::Data(Bytes(32, 7)));
+
+    auto streams = Plist::Array();
+    streams.Append(move(stream));
+
+    auto setup = Plist::Dict();
+    setup.Set("streams", move(streams));
+
+    const Bytes body = setup.ToBinary();
+
+    Request request;
+    request.method = "SETUP";
+    request.path = "rtsp://127.0.0.1/1";
+    request.headers["content-type"] = "application/x-apple-binary-plist";
+    request.body.assign(body.begin(), body.end());
+    request.remoteAddr = "127.0.0.1";
+    request.localAddr = "127.0.0.1";
+
+    ASSERT_TRUE(service.IsAirPlay2Request(*connection, request));
+
+    Response response;
+    service.Handle(*connection, request, response);
+    EXPECT_EQ(response.status, 501);
+}

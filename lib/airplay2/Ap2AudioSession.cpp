@@ -640,6 +640,12 @@ namespace AirPlay2
                     StartOutput();
                     WriteSilence(silenceNs);
                     lock.lock();
+
+                    // the queue may have been flushed while we weren't holding the lock
+                    if (m_stop || m_restartPending || !ShouldPlay() || m_queue.empty())
+                    {
+                        continue;
+                    }
                 }
 
                 if (m_params.type == StreamType::Buffered && static_cast<int64_t>(m_pcm->GetSize()) >= targetBytes)

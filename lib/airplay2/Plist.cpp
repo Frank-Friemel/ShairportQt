@@ -450,6 +450,8 @@ namespace AirPlay2
         PlistReader(const uint8_t* data, size_t len)
             : m_data{ data }
             , m_len{ len }
+            , m_nodeBudget{ 4 * static_cast<uint64_t>(len) + 64 }
+            , m_byteBudget{ 4 * static_cast<uint64_t>(len) + 64 * 1024 }
         {
         }
 
@@ -524,10 +526,14 @@ namespace AirPlay2
         {
             uint64_t pos = 0;
 
-            if (depth > 32 || !ObjectOffset(index, pos))
+            // objects may be referenced multiple times: limit the total work
+            // so that a small malicious plist can't expand exponentially
+            if (depth > 32 || m_nodeBudget == 0 || !ObjectOffset(index, pos))
             {
                 return false;
             }
+            --m_nodeBudget;
+
             const uint8_t marker = m_data[pos++];
             const uint8_t type = marker & 0xF0;
 
@@ -599,10 +605,12 @@ namespace AirPlay2
             {
                 uint64_t count = 0;
 
-                if (!ReadCount(pos, marker, count) || !Available(pos, count))
+                if (!ReadCount(pos, marker, count) || !Available(pos, count) || count > m_byteBudget)
                 {
                     return false;
                 }
+                m_byteBudget -= count;
+
                 if (type == 0x40)
                 {
                     result = Plist::Data(Bytes(m_data + pos, m_data + pos + count));
@@ -617,10 +625,12 @@ namespace AirPlay2
             {
                 uint64_t count = 0;
 
-                if (!ReadCount(pos, marker, count) || count > m_len || !Available(pos, count * 2))
+                if (!ReadCount(pos, marker, count) || count > m_len || !Available(pos, count * 2) || count * 3 > m_byteBudget)
                 {
                     return false;
                 }
+                m_byteBudget -= count * 3;
+
                 u16string s;
                 s.reserve(static_cast<size_t>(count));
 
@@ -701,6 +711,8 @@ namespace AirPlay2
         size_t m_refSize{ 0 };
         uint64_t m_numObjects{ 0 };
         uint64_t m_offsetTable{ 0 };
+        uint64_t m_nodeBudget{ 0 };
+        uint64_t m_byteBudget{ 0 };
     };
 
     Bytes Plist::ToBinary() const
