@@ -69,10 +69,12 @@ namespace AirPlay2
             uint8_t flags = 0;
             request.GetByte(TlvType::Flags, flags);
 
-            if (!(flags & FlagTransient))
+            m_transient = (flags & FlagTransient) != 0;
+            m_setupKey.clear();
+
+            if (!m_transient)
             {
-                // full HomeKit pairing (M5/M6 with long-term keys) is not supported (yet)
-                spdlog::info("AirPlay2: non-transient pair-setup requested (flags {:#x}), trying transient anyway", flags);
+                spdlog::info("AirPlay2: full pair-setup requested (flags {:#x})", flags);
             }
             m_srp = make_unique<SrpServer>("Pair-Setup", SetupPin);
 
@@ -103,23 +105,32 @@ namespace AirPlay2
                 response = ErrorResponse(4, TlvError::Authentication);
                 return true;
             }
-            m_secret = m_srp->SessionKey();
+            const Bytes sessionKey = m_srp->SessionKey();
             m_srp.reset();
-            m_setupDone = true;
-            m_enableEncryption = true;
 
             Tlv8 tlv;
             tlv.Add(TlvType::State, 4);
             tlv.Add(TlvType::Proof, serverProof);
             response = tlv.Encode();
-            spdlog::info("AirPlay2: transient pair-setup completed");
+
+            if (m_transient)
+            {
+                // the response is still sent unencrypted, everything afterwards is encrypted
+                m_secret = sessionKey;
+                m_enableEncryption = true;
+                spdlog::info("AirPlay2: transient pair-setup completed");
+            }
+            else
+            {
+                // the full pair-setup continues with M5/M6 on the plain connection
+                m_setupKey = sessionKey;
+            }
             return true;
         }
 
         if (state == 5)
         {
-            // M5 is only used by the non-transient pairing
-            response = ErrorResponse(6, TlvError::Unknown);
+            response = HandlePairSetupM5(request);
             return true;
         }
         return false;
@@ -203,18 +214,88 @@ namespace AirPlay2
             }
             // we don't keep a list of paired controllers, therefore the controller's signature
             // can't be checked against a long-term public key (see doc/AirPlay2-OptionalFeatures.md)
+            // the connection stays unencrypted, the transient pair-setup follows (like shairport-sync)
             Tlv8 tlv;
             tlv.Add(TlvType::State, 4);
             response = tlv.Encode();
 
-            if (!m_setupDone)
-            {
-                m_secret = m_verifyShared;
-                m_enableEncryption = true;
-            }
             spdlog::info("AirPlay2: pair-verify completed");
             return true;
         }
         return false;
+    }
+
+    Bytes Pairing::HandlePairSetupM5(const Tlv8& request)
+    {
+        const Bytes* encrypted = request.Get(TlvType::EncryptedData);
+
+        if (m_setupKey.empty() || !encrypted || encrypted->size() < 16)
+        {
+            spdlog::warn("AirPlay2: unexpected pair-setup M5");
+            return ErrorResponse(6, TlvError::Authentication);
+        }
+        const Bytes setupKey = move(m_setupKey);
+        m_setupKey.clear();
+
+        const Bytes key = Crypto::HkdfSha512(setupKey, "Pair-Setup-Encrypt-Salt", "Pair-Setup-Encrypt-Info");
+        uint8_t nonce[12];
+        Crypto::MakeLabelNonce("PS-Msg05", nonce);
+
+        const size_t plainLen = encrypted->size() - 16;
+        Bytes plain(plainLen);
+
+        if (!Crypto::ChaChaDecrypt(key.data(), nonce, nullptr, 0, encrypted->data(), plainLen, encrypted->data() + plainLen, plain.data()))
+        {
+            spdlog::warn("AirPlay2: pair-setup M5 decryption failed");
+            return ErrorResponse(6, TlvError::Authentication);
+        }
+        Tlv8 sub;
+
+        if (!Tlv8::Decode(plain.data(), plain.size(), sub))
+        {
+            return ErrorResponse(6, TlvError::Authentication);
+        }
+        const Bytes* controllerId = sub.Get(TlvType::Identifier);
+        const Bytes* controllerKey = sub.Get(TlvType::PublicKey);
+        const Bytes* controllerSignature = sub.Get(TlvType::Signature);
+
+        if (!controllerId || !controllerKey || controllerKey->size() != 32 || !controllerSignature || controllerSignature->size() != 64)
+        {
+            spdlog::warn("AirPlay2: pair-setup M5 without controller identity");
+            return ErrorResponse(6, TlvError::Authentication);
+        }
+        const Bytes controllerX = Crypto::HkdfSha512(setupKey, "Pair-Setup-Controller-Sign-Salt", "Pair-Setup-Controller-Sign-Info");
+
+        if (!Crypto::Ed25519Key::Verify(*controllerKey, Concat({ &controllerX, controllerId, controllerKey }), *controllerSignature))
+        {
+            spdlog::warn("AirPlay2: pair-setup M5 signature verification failed");
+            return ErrorResponse(6, TlvError::Authentication);
+        }
+
+        // M6: our long-term identity, signed and encrypted
+        const Bytes id(m_deviceId.begin(), m_deviceId.end());
+        const Bytes accessoryX = Crypto::HkdfSha512(setupKey, "Pair-Setup-Accessory-Sign-Salt", "Pair-Setup-Accessory-Sign-Info");
+
+        Tlv8 accessory;
+        accessory.Add(TlvType::Identifier, id);
+        accessory.Add(TlvType::PublicKey, m_identity.PublicKey());
+        accessory.Add(TlvType::Signature, m_identity.Sign(Concat({ &accessoryX, &id, &m_identity.PublicKey() })));
+        const Bytes accessoryPlain = accessory.Encode();
+
+        Crypto::MakeLabelNonce("PS-Msg06", nonce);
+        Bytes accessoryEncrypted(accessoryPlain.size() + 16);
+
+        if (!Crypto::ChaChaEncrypt(key.data(), nonce, nullptr, 0, accessoryPlain.data(), accessoryPlain.size(),
+            accessoryEncrypted.data(), accessoryEncrypted.data() + accessoryPlain.size()))
+        {
+            return ErrorResponse(6, TlvError::Unknown);
+        }
+        Tlv8 tlv;
+        tlv.Add(TlvType::State, 6);
+        tlv.Add(TlvType::EncryptedData, accessoryEncrypted);
+
+        // the controller isn't persisted (see doc/AirPlay2-OptionalFeatures.md)
+        spdlog::info("AirPlay2: full pair-setup completed with controller {}", string(controllerId->begin(), controllerId->end()));
+        return tlv.Encode();
     }
 }

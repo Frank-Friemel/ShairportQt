@@ -36,6 +36,7 @@ public:
     int GetProgressTime() const noexcept override;
     bool IsPlaying() const noexcept override;
     uint64_t GetSamplingFreq() const noexcept override;
+    std::string GetConnectionInfo() const override;
 
 protected:
     void OnRequest(RtpEndpoint* endpoint, std::unique_ptr<RtpPacket>&& packet) override;

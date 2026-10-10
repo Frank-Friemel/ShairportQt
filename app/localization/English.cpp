@@ -126,6 +126,9 @@ namespace Localization::English
 		case StringID::LABEL_ENABLE_AIRPLAY2:
 			return "AirPlay 2 (experimental)"s;
 
+		case StringID::LABEL_SHOW_CONNECTION_DETAILS:
+			return "Show connection details (AirPlay version, codec...)"s;
+
 		case StringID::LABEL_LOG_TO_FILE:
 			return "Log to file"s;
 

@@ -301,6 +301,23 @@ bool RaopServer::GetProgress(int& duration, int& position, string& clientID) con
 	return false;
 }
 
+string RaopServer::GetConnectionInfo() const noexcept
+{
+	try
+	{
+		const shared_lock<shared_mutex> guard(m_mtxDecoder);
+
+		if (m_decoder)
+		{
+			return m_decoder->GetConnectionInfo();
+		}
+	}
+	catch (...)
+	{
+	}
+	return {};
+}
+
 bool RaopServer::EnableServer(bool enable) noexcept
 {
 	m_serviceDisabled = !enable;

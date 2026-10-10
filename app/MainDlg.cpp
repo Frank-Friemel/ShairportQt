@@ -148,6 +148,7 @@ MainDlg::MainDlg(QApplication* app,
     connect(this, &MainDlg::UpdateMMState, this, &MainDlg::OnUpdateMMState);
     connect(this, &MainDlg::UpdateWidgets, this, &MainDlg::OnUpdateWidgets);
     connect(this, &MainDlg::SetProgressInfo, this, &MainDlg::OnProgressInfo);
+    connect(this, &MainDlg::SetConnectionInfo, this, &MainDlg::OnConnectionInfo);
     connect(this, &MainDlg::ShowStatus, this, &MainDlg::OnShowStatus);
     connect(this, &MainDlg::SetPlayState, this, &MainDlg::OnPlayState);
     connect(this, &MainDlg::ShowDmapInfo, this, &MainDlg::OnDmapInfo);
@@ -273,19 +274,27 @@ void MainDlg::RunScheduler() noexcept
                     {
                         try
                         {
-                            const auto client = raopServer->GetClient(clientID);
-
-                            if (client.IsValid())
+                            try
                             {
-                                auto clientInfo = VariantValue::Key("clientInfo").TryGet<string>(client);
+                                // AirPlay 2 senders aren't in the RAOP client collection
+                                const auto client = raopServer->GetClient(clientID);
 
-                                if (clientInfo.has_value())
+                                if (client.IsValid())
                                 {
-                                    clientID = std::move(clientInfo.value());
+                                    auto clientInfo = VariantValue::Key("clientInfo").TryGet<string>(client);
+
+                                    if (clientInfo.has_value())
+                                    {
+                                        clientID = std::move(clientInfo.value());
+                                    }
                                 }
+                            }
+                            catch (...)
+                            {
                             }
 
                             emit SetProgressInfo(position, duration, clientID.c_str());
+                            emit SetConnectionInfo(QString::fromStdString(raopServer->GetConnectionInfo()));
                             progressState = 0;
 
                             if (raopServer->IsPlaying())
@@ -318,6 +327,7 @@ void MainDlg::RunScheduler() noexcept
                         {
                             // empty the progress info
                             emit SetProgressInfo(0, 0, emptyString);
+                            emit SetConnectionInfo(emptyString);
 
                             // empty the title info
                             emit ShowDmapInfo(emptyString, emptyString, emptyString);
@@ -475,8 +485,24 @@ void MainDlg::WidgetCreateStatusGroup()
 
     QPointer<QHBoxLayout> layout = new QHBoxLayout;
 
+    QPointer<QVBoxLayout> statusLayout = new QVBoxLayout;
+    statusLayout->setSpacing(2);
+
     m_labelStatus = new QLabel;
-    layout->addWidget(m_labelStatus, 2);
+    statusLayout->addWidget(m_labelStatus);
+
+    // optional details about the current connection (AirPlay version, codec, ...)
+    m_labelConnectionInfo = new QLabel;
+    m_labelConnectionInfo->setWordWrap(true);
+    m_labelConnectionInfo->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    QFont infoFont = m_labelConnectionInfo->font();
+    infoFont.setPointSizeF(infoFont.pointSizeF() * 0.9);
+    m_labelConnectionInfo->setFont(infoFont);
+    m_labelConnectionInfo->setForegroundRole(QPalette::ColorRole::PlaceholderText);
+    m_labelConnectionInfo->setVisible(false);
+    statusLayout->addWidget(m_labelConnectionInfo);
+
+    layout->addLayout(statusLayout, 2);
 
     m_buttonMinimize = new QPushButton(QIcon(":/minimize.png"), tr(""));
     m_buttonMinimize->setFlat(true);
@@ -1809,6 +1835,23 @@ void MainDlg::OnProgressInfo(int currentSeconds, int totalSeconds, QString conne
     }
 }
 
+// Widget slot: SetConnectionInfo
+void MainDlg::OnConnectionInfo(QString info)
+{
+    const bool show = VariantValue::Key("ShowConnectionInfo").TryGet<bool>(m_config).value_or(true);
+
+    if (m_labelConnectionInfo->text() != info)
+    {
+        m_labelConnectionInfo->setText(info);
+
+        if (!info.isEmpty())
+        {
+            spdlog::info("Connection: {}", info.toStdString());
+        }
+    }
+    m_labelConnectionInfo->setVisible(show && !info.isEmpty());
+}
+
 // Widget slot: "This process should end"
 void MainDlg::OnQuit()
 {
@@ -2662,6 +2705,11 @@ void MainDlg::OnOptions()
     // AirPlay 2 requires FFmpeg for audio decoding
     airPlay2Option->setEnabled(AirPlay2::Service::IsSupported());
 
+    const bool showConnectionInfo = VariantValue::Key("ShowConnectionInfo").TryGet<bool>(m_config).value_or(true);
+
+    QPointer<QCheckBox> connectionInfoOption = new QCheckBox(GetString(StringID::LABEL_SHOW_CONNECTION_DETAILS));
+    connectionInfoOption->setCheckState(showConnectionInfo ? Qt::CheckState::Checked : Qt::CheckState::Unchecked);
+
     QPointer<QVBoxLayout> mainLayout = new QVBoxLayout(dlg);
 
     mainLayout->addWidget(bufferingGroup);
@@ -2673,6 +2721,7 @@ void MainDlg::OnOptions()
     mainLayout->addWidget(mediaControlOption);
     mainLayout->addWidget(sysMMControlOption);    
     mainLayout->addWidget(airPlay2Option);
+    mainLayout->addWidget(connectionInfoOption);
     mainLayout->addWidget(buttonBox);
 
     dlg->setLayout(mainLayout);
@@ -2731,6 +2780,13 @@ void MainDlg::OnOptions()
 
             // restart the RAOP service
             ShowMessage(StringID::RECONFIG_RAOP_SERVICE);
+        }
+        const bool newShowConnectionInfo = connectionInfoOption->checkState() == Qt::CheckState::Checked;
+
+        if (newShowConnectionInfo != showConnectionInfo)
+        {
+            VariantValue::Key("ShowConnectionInfo").Set(m_config, newShowConnectionInfo);
+            m_labelConnectionInfo->setVisible(newShowConnectionInfo && !m_labelConnectionInfo->text().isEmpty());
         }
         if (newLogToFile != logToFile)
         {

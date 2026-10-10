@@ -1,6 +1,7 @@
 #include "airplay2/AirPlay2Handler.h"
 #include "airplay2/Ap2AudioSession.h"
 #include "airplay2/Ap2Decoder.h"
+#include "airplay2/FairPlaySetup.h"
 #include "airplay2/Pairing.h"
 #include "airplay2/Plist.h"
 #include "airplay2/PtpClock.h"
@@ -17,8 +18,9 @@ namespace AirPlay2
 {
     namespace
     {
-        // features as used by shairport-sync for buffered audio without plist metadata:
-        // bits 9, 11, 14, 18, 19, 22, 30, 38, 40, 41, 46, 48
+        // features as used by shairport-sync for buffered audio without plist metadata
+        // (bit 14, MFi soft FairPlay, is needed by iOS: it hangs up after the pairing without it):
+        // bits 9, 11, 14, 18, 19, 20, 22, 30, 38, 40, 41, 47, 48
         constexpr uint64_t BaseFeatures = 0x00018340405C4A00ULL;
         constexpr uint64_t FeatureArtwork = 1ULL << 15;
         constexpr uint64_t FeatureProgress = 1ULL << 16;
@@ -105,8 +107,9 @@ namespace AirPlay2
             return buf;
         }
 
-        bool WaitReadable(sockpp::socket_t handle, int ms) noexcept
+        bool WaitReadable(const sockpp::socket& socket, int ms) noexcept
         {
+            const auto handle = socket.handle();
             fd_set set;
             FD_ZERO(&set);
             FD_SET(handle, &set);
@@ -409,9 +412,21 @@ namespace AirPlay2
                 response.body.assign(reinterpret_cast<const char*>(result.data()), result.size());
                 response.contentType = "application/octet-stream"s;
             }
-            else if (path == "/fp-setup" || path == "/pair-add" || path == "/pair-remove" || path == "/pair-list")
+            else if (path == "/fp-setup")
             {
-                // FairPlay and HomeKit pairing management are not supported
+                Bytes result;
+
+                if (!HandleFairPlaySetup(reinterpret_cast<const uint8_t*>(request.body.data()), request.body.size(), result))
+                {
+                    response.status = 400;
+                    return true;
+                }
+                response.body.assign(reinterpret_cast<const char*>(result.data()), result.size());
+                response.contentType = "application/octet-stream"s;
+            }
+            else if (path == "/pair-add" || path == "/pair-remove" || path == "/pair-list")
+            {
+                // HomeKit pairing management is not supported
                 spdlog::info("AirPlay2: unsupported request {}", path);
                 response.status = 501;
             }
@@ -551,7 +566,7 @@ namespace AirPlay2
                 {
                     try
                     {
-                        if (WaitReadable(conn->m_eventAcceptor->handle(), 100))
+                        if (WaitReadable(*conn->m_eventAcceptor, 100))
                         {
                             auto socket = conn->m_eventAcceptor->accept();
 
@@ -563,7 +578,7 @@ namespace AirPlay2
                         }
                         for (auto it = sockets.begin(); it != sockets.end();)
                         {
-                            if (WaitReadable(it->handle(), 0) && it->read(buffer, sizeof(buffer)) <= 0)
+                            if (WaitReadable(*it, 0) && it->read(buffer, sizeof(buffer)) <= 0)
                             {
                                 it = sockets.erase(it);
                             }

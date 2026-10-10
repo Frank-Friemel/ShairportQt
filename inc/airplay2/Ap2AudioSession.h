@@ -78,6 +78,7 @@ namespace AirPlay2
         int GetProgressTime() const noexcept override;
         bool IsPlaying() const noexcept override;
         uint64_t GetSamplingFreq() const noexcept override;
+        std::string GetConnectionInfo() const override;
 
         // feeds a raw (encrypted) packet - exposed for testing
         void OnPacket(const uint8_t* data, size_t len);
@@ -139,6 +140,10 @@ namespace AirPlay2
         bool                                m_unknownSsrcLogged{ false };
         double                              m_errLeft{ 0. };
         double                              m_errRight{ 0. };
+
+        // format currently being decoded (for GetConnectionInfo)
+        mutable std::mutex                  m_mtxInfo;
+        std::optional<AudioFormat>          m_activeFormat;
 
         std::atomic_bool                    m_outputActive{ false };
         std::atomic_int64_t                 m_progressData{ 0 };

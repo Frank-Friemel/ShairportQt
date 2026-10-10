@@ -85,6 +85,11 @@ I recommend to use `vcpkg` in order to get them.
 It works very well on Linux and Windows.
 
 On Windows just open `ShairportQt` as CMake project with Visual Studio.
+The default MSVC build uses the static C runtime. When using official prebuilt Qt
+MSVC binaries, use vcpkg's `x64-windows-static-md` triplet and set
+`CMAKE_MSVC_RUNTIME_LIBRARY` to `MultiThreaded$<$<CONFIG:Debug>:Debug>DLL` so the
+application and its dependencies use the same dynamic C runtime. Deploy the Qt
+and FFmpeg DLLs alongside the executable when using shared builds of these libraries.
 On Linux you may use Visual Studio Code or build from the command line (assumed you're using `vcpkg`):
 
 ```shell
@@ -200,4 +205,3 @@ sudo systemctl start avahi-daemon
 
 On some Linux distributions you may have to install `avahi` via their own desktop installation tool. Please see my
 Video [Installation of ShairportQt on Suse](https://youtu.be/UIfek93D5Hw).
-

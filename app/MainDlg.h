@@ -123,6 +123,7 @@ signals:
     void UpdateMMState() const;
     void UpdateWidgets() const;
     void SetProgressInfo(int currentSeconds, int totalSeconds, QString connectedClient);
+    void SetConnectionInfo(QString info);
     void ShowStatus(QString status);
     void SetPlayState(bool isPlaying);
     void ShowDmapInfo(QString album, QString track, QString artist);
@@ -142,6 +143,7 @@ private slots:
     void OnChangeAirport();
     void OnUpdateWidgets();
     void OnProgressInfo(int currentSeconds, int totalSeconds, QString connectedClient);
+    void OnConnectionInfo(QString info);
     void OnShowStatus(QString status);
     void OnPlayState(bool isPlaying);
     void OnDmapInfo(QString album, QString track, QString artist);
@@ -198,6 +200,7 @@ private:
     // Status Group
     QPointer<QGroupBox>                 m_groupBoxStatus;
     QPointer<QLabel>                    m_labelStatus;
+    QPointer<QLabel>                    m_labelConnectionInfo;
     QPointer<QPushButton>               m_buttonMinimize;
 
     // Airport Group

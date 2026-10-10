@@ -77,15 +77,13 @@ uses PIN `3939`.
 
 ## HomeKit pairing
 
-**Today:** only *transient* pair-setup (flag `0x10`, M1–M4) is supported. Pair-verify works with any controller
+**Today:** transient pair-setup (flag `0x10`, M1–M4) and the full pair-setup (M1–M6, the controller's signature in M5
+is verified and M6 returns our signed identity) are supported, but the controllers aren't persisted. Pair-verify works with any controller
 (we sign with our Ed25519 key but don't verify the controller's long-term key). `pair-add`, `pair-remove` and
 `pair-list` return 501.
 
 **How to add:**
-- Implement pair-setup M5/M6. Decrypt the M5 sub-TLV with ChaCha20-Poly1305 (`Pair-Setup-Encrypt-Salt`/`-Info`,
-  nonce `PS-Msg05`) and verify the controller signature over `HKDF(K, "Pair-Setup-Controller-Sign-Salt", "…-Info") ||
-  pairingID || LTPK`. Store `{pairingID → LTPK, permissions}` in the config (a new key such as `AirPlay2Controllers`). Reply
-  with our own signed accessory info (M6, nonce `PS-Msg06`).
+- Store `{pairingID → LTPK, permissions}` from pair-setup M5 in the config (a new key such as `AirPlay2Controllers`).
 - In pair-verify M3, look up the controller's `Identifier`, verify its signature over `ourPublicKey || identifier ||
   theirPublicKey`, and reject unknown controllers when access control is set to "only paired devices".
 - Implement `pair-add` / `pair-remove` / `pair-list` (TLV8 method 3/4/5, admin permission check). These are used by the

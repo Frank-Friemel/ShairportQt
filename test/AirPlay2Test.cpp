@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -6,6 +7,7 @@
 #include "airplay2/Ap2AudioSession.h"
 #include "airplay2/Ap2Crypto.h"
 #include "airplay2/Ap2Decoder.h"
+#include "airplay2/FairPlaySetup.h"
 #include "airplay2/Pairing.h"
 #include "airplay2/Plist.h"
 #include "airplay2/PtpClock.h"
@@ -27,6 +29,48 @@ namespace
     Bytes FromString(const string& s)
     {
         return Bytes(s.begin(), s.end());
+    }
+
+    // runs pair-setup M1 to M4 with the correct PIN, returns the SRP session key (empty on failure)
+    Bytes RunPairSetupM1ToM4(Pairing& pairing, uint8_t flags)
+    {
+        Tlv8 m1;
+        m1.Add(TlvType::Method, 0);
+        m1.Add(TlvType::State, 1);
+
+        if (flags)
+        {
+            m1.Add(TlvType::Flags, flags);
+        }
+        auto data = m1.Encode();
+        Bytes response;
+        Tlv8 m2;
+
+        if (!pairing.HandlePairSetup(data.data(), data.size(), response) || !Tlv8::Decode(response.data(), response.size(), m2)
+            || !m2.Get(TlvType::Salt) || !m2.Get(TlvType::PublicKey))
+        {
+            return {};
+        }
+        SrpClient client("Pair-Setup", Pairing::SetupPin);
+        Bytes proof;
+
+        if (!client.ProcessChallenge(*m2.Get(TlvType::Salt), *m2.Get(TlvType::PublicKey), proof))
+        {
+            return {};
+        }
+        Tlv8 m3;
+        m3.Add(TlvType::State, 3);
+        m3.Add(TlvType::PublicKey, client.PublicKey());
+        m3.Add(TlvType::Proof, proof);
+        data = m3.Encode();
+        Tlv8 m4;
+
+        if (!pairing.HandlePairSetup(data.data(), data.size(), response) || !Tlv8::Decode(response.data(), response.size(), m4)
+            || !m4.Get(TlvType::Proof) || !client.VerifyServer(*m4.Get(TlvType::Proof)))
+        {
+            return {};
+        }
+        return client.SessionKey();
     }
 }
 
@@ -328,9 +372,138 @@ TEST(AirPlay2, PairVerify)
     EXPECT_EQ(state, 4);
     EXPECT_EQ(m4.Get(TlvType::Error), nullptr);
 
+    // pair-verify doesn't enable the encryption, the transient pair-setup follows on the plain connection
     Bytes secret;
+    EXPECT_FALSE(pairing.TakeEncryptionSecret(secret));
+
+    const Bytes setupKey = RunPairSetupM1ToM4(pairing, 0x10);
+    ASSERT_FALSE(setupKey.empty());
     ASSERT_TRUE(pairing.TakeEncryptionSecret(secret));
-    EXPECT_EQ(secret, shared);
+    EXPECT_EQ(secret, setupKey);
+}
+
+TEST(AirPlay2, FullPairSetup)
+{
+    const auto identity = AirPlay2::Crypto::Ed25519Key::Generate();
+    const string deviceId = "AA:BB:CC:DD:EE:FF";
+    Pairing pairing(identity, deviceId);
+
+    // M1 without the transient flag
+    const Bytes setupKey = RunPairSetupM1ToM4(pairing, 0);
+    ASSERT_FALSE(setupKey.empty());
+
+    // M5 is sent on the plain connection
+    Bytes secret;
+    EXPECT_FALSE(pairing.TakeEncryptionSecret(secret));
+
+    const Bytes key = AirPlay2::Crypto::HkdfSha512(setupKey, "Pair-Setup-Encrypt-Salt", "Pair-Setup-Encrypt-Info");
+    const auto controllerKey = AirPlay2::Crypto::Ed25519Key::Generate();
+    const Bytes controllerId = FromString("controller");
+
+    auto makeM5 = [&](const Bytes& signedKey)
+    {
+        Bytes info = AirPlay2::Crypto::HkdfSha512(setupKey, "Pair-Setup-Controller-Sign-Salt", "Pair-Setup-Controller-Sign-Info");
+        info.insert(info.end(), controllerId.begin(), controllerId.end());
+        info.insert(info.end(), signedKey.begin(), signedKey.end());
+
+        Tlv8 sub;
+        sub.Add(TlvType::Identifier, controllerId);
+        sub.Add(TlvType::PublicKey, controllerKey.PublicKey());
+        sub.Add(TlvType::Signature, controllerKey.Sign(info));
+        const auto plain = sub.Encode();
+
+        Bytes enc(plain.size() + 16);
+        uint8_t nonce[12];
+        AirPlay2::Crypto::MakeLabelNonce("PS-Msg05", nonce);
+        EXPECT_TRUE(AirPlay2::Crypto::ChaChaEncrypt(key.data(), nonce, nullptr, 0, plain.data(), plain.size(), enc.data(), enc.data() + plain.size()));
+
+        Tlv8 m5;
+        m5.Add(TlvType::State, 5);
+        m5.Add(TlvType::EncryptedData, enc);
+        return m5.Encode();
+    };
+    auto data = makeM5(controllerKey.PublicKey());
+
+    Bytes response;
+    ASSERT_TRUE(pairing.HandlePairSetup(data.data(), data.size(), response));
+
+    Tlv8 m6;
+    ASSERT_TRUE(Tlv8::Decode(response.data(), response.size(), m6));
+    uint8_t state = 0;
+    ASSERT_TRUE(m6.GetByte(TlvType::State, state));
+    EXPECT_EQ(state, 6);
+    EXPECT_EQ(m6.Get(TlvType::Error), nullptr);
+    ASSERT_NE(m6.Get(TlvType::EncryptedData), nullptr);
+
+    const Bytes& enc = *m6.Get(TlvType::EncryptedData);
+    ASSERT_GT(enc.size(), 16u);
+    Bytes plain(enc.size() - 16);
+    uint8_t nonce[12];
+    AirPlay2::Crypto::MakeLabelNonce("PS-Msg06", nonce);
+    ASSERT_TRUE(AirPlay2::Crypto::ChaChaDecrypt(key.data(), nonce, nullptr, 0, enc.data(), plain.size(), enc.data() + plain.size(), plain.data()));
+
+    Tlv8 sub;
+    ASSERT_TRUE(Tlv8::Decode(plain.data(), plain.size(), sub));
+    ASSERT_NE(sub.Get(TlvType::Identifier), nullptr);
+    EXPECT_EQ(*sub.Get(TlvType::Identifier), FromString(deviceId));
+    ASSERT_NE(sub.Get(TlvType::PublicKey), nullptr);
+    EXPECT_EQ(*sub.Get(TlvType::PublicKey), identity.PublicKey());
+    ASSERT_NE(sub.Get(TlvType::Signature), nullptr);
+
+    Bytes info = AirPlay2::Crypto::HkdfSha512(setupKey, "Pair-Setup-Accessory-Sign-Salt", "Pair-Setup-Accessory-Sign-Info");
+    const Bytes id = FromString(deviceId);
+    info.insert(info.end(), id.begin(), id.end());
+    info.insert(info.end(), identity.PublicKey().begin(), identity.PublicKey().end());
+    EXPECT_TRUE(AirPlay2::Crypto::Ed25519Key::Verify(identity.PublicKey(), info, *sub.Get(TlvType::Signature)));
+
+    // the full pair-setup doesn't enable the encryption
+    EXPECT_FALSE(pairing.TakeEncryptionSecret(secret));
+
+    // an invalid controller signature is rejected
+    Pairing pairing2(identity, deviceId);
+    const Bytes setupKey2 = RunPairSetupM1ToM4(pairing2, 0);
+    ASSERT_FALSE(setupKey2.empty());
+    data = makeM5(AirPlay2::Crypto::Ed25519Key::Generate().PublicKey()); // wrong session key and signed key
+    ASSERT_TRUE(pairing2.HandlePairSetup(data.data(), data.size(), response));
+    Tlv8 m6b;
+    ASSERT_TRUE(Tlv8::Decode(response.data(), response.size(), m6b));
+    uint8_t error = 0;
+    EXPECT_TRUE(m6b.GetByte(TlvType::Error, error));
+    EXPECT_EQ(error, static_cast<uint8_t>(TlvError::Authentication));
+}
+
+TEST(AirPlay2, FairPlaySetup)
+{
+    // first message: "FPLY", version 3, type 1, seq 1, mode at offset 14
+    Bytes setup1{ 'F', 'P', 'L', 'Y', 3, 1, 1, 0, 0, 0, 0, 4, 2, 0, 2, 0 };
+    Bytes response;
+    ASSERT_TRUE(HandleFairPlaySetup(setup1.data(), setup1.size(), response));
+    ASSERT_EQ(response.size(), 142u);
+    EXPECT_EQ(memcmp(response.data(), "FPLY", 4), 0);
+    EXPECT_EQ(response[13], 2); // the reply for mode 2
+
+    setup1[14] = 4;
+    EXPECT_FALSE(HandleFairPlaySetup(setup1.data(), setup1.size(), response));
+
+    // second message: seq 3, the reply ends with the last 20 bytes of the request
+    Bytes setup2(164);
+    memcpy(setup2.data(), "FPLY", 4);
+    setup2[4] = 3;
+    setup2[5] = 1;
+    setup2[6] = 3;
+
+    for (size_t i = 0; i < 20; ++i)
+    {
+        setup2[144 + i] = static_cast<uint8_t>(i + 1);
+    }
+    ASSERT_TRUE(HandleFairPlaySetup(setup2.data(), setup2.size(), response));
+    ASSERT_EQ(response.size(), 32u);
+    EXPECT_EQ(memcmp(response.data(), "FPLY", 4), 0);
+    EXPECT_TRUE(equal(response.begin() + 12, response.end(), setup2.begin() + 144));
+
+    // garbage
+    const Bytes garbage{ 1, 2, 3 };
+    EXPECT_FALSE(HandleFairPlaySetup(garbage.data(), garbage.size(), response));
 }
 
 TEST(AirPlay2, PtpMessageAndOffset)
@@ -441,6 +614,36 @@ TEST(AirPlay2, AudioFormats)
     EXPECT_EQ(format.sampleRate, 48000);
 
     EXPECT_FALSE(AudioFormatFromAirPlayFormat(0x1000000000ULL, format));
+}
+
+TEST(AirPlay2, ConnectionInfo)
+{
+    if (!Ap2Decoder::IsAvailable())
+    {
+        GTEST_SKIP() << "no AirPlay 2 decoder";
+    }
+    auto config = MakeShared<ValueCollection>();
+
+    Ap2SessionParams params;
+    params.type = StreamType::Buffered;
+    params.sharedKey = AirPlay2::Crypto::RandomBytes(32);
+    params.clientID = "127.0.0.1";
+    ASSERT_TRUE(AudioFormatFromAirPlayFormat(0x40000, params.format));
+
+    Ap2AudioSession session(config, params, nullptr);
+    const IAudioSession& audioSession = session;
+
+    string info = audioSession.GetConnectionInfo();
+    EXPECT_EQ(info.rfind("AirPlay 2 | buffered (TCP) | ALAC 44100 Hz, 16-bit, 2 ch", 0), 0u) << info;
+    EXPECT_NE(info.find("ChaCha20-Poly1305"), string::npos) << info;
+    EXPECT_NE(info.find("no anchor yet"), string::npos) << info;
+
+    // anchor without network time: local timing
+    session.SetRateAnchor(0., 1000u, nullopt, 0);
+    info = audioSession.GetConnectionInfo();
+    EXPECT_NE(info.find("local timing"), string::npos) << info;
+
+    session.Stop();
 }
 
 TEST(AirPlay2, DecoderAvailability)

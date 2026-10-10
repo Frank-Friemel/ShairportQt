@@ -32,8 +32,9 @@ namespace AirPlay2
             return static_cast<int32_t>(a - b) < 0;
         }
 
-        bool WaitReadable(sockpp::socket_t handle, int ms) noexcept
+        bool WaitReadable(const sockpp::socket& socket, int ms) noexcept
         {
+            const auto handle = socket.handle();
             fd_set set;
             FD_ZERO(&set);
             FD_SET(handle, &set);
@@ -252,7 +253,7 @@ namespace AirPlay2
         {
             try
             {
-                if (!WaitReadable(m_acceptor->handle(), 200))
+                if (!WaitReadable(*m_acceptor, 200))
                 {
                     continue;
                 }
@@ -281,7 +282,7 @@ namespace AirPlay2
 
         while (!m_stop)
         {
-            if (!WaitReadable(socket.handle(), 200))
+            if (!WaitReadable(socket, 200))
             {
                 continue;
             }
@@ -423,6 +424,42 @@ namespace AirPlay2
         return static_cast<uint64_t>(m_params.format.sampleRate);
     }
 
+    string Ap2AudioSession::GetConnectionInfo() const
+    {
+        AudioFormat format = m_params.format;
+        bool decoding = false;
+        {
+            const lock_guard<mutex> guard(m_mtxInfo);
+
+            if (m_activeFormat.has_value())
+            {
+                format = m_activeFormat.value();
+                decoding = true;
+            }
+        }
+        const bool buffered = m_params.type == StreamType::Buffered;
+
+        string info = "AirPlay 2 | "s + (buffered ? "buffered (TCP)"s : "realtime (RTP/UDP)"s) + " | "s +
+            (format.codec == AudioCodec::AAC ? "AAC"s : "ALAC"s) + " "s + to_string(format.sampleRate) + " Hz, "s +
+            to_string(format.bitDepth) + "-bit, "s + to_string(format.channels) + " ch"s +
+            (decoding ? ""s : " (announced)"s) + " | ChaCha20-Poly1305"s;
+
+        if (buffered)
+        {
+            const lock_guard<mutex> guard(m_mtx);
+
+            if (!m_anchorValid)
+            {
+                info += " | no anchor yet"s;
+            }
+            else
+            {
+                info += m_anchorLocalNs.has_value() ? " | PTP timing"s : " | local timing (no PTP lock)"s;
+            }
+        }
+        return info;
+    }
+
     bool Ap2AudioSession::StartOutput()
     {
         m_pcm = MakeShared<BlobStream>();
@@ -507,6 +544,11 @@ namespace AirPlay2
             {
                 return;
             }
+            spdlog::info("AirPlay2: decoding {} {} Hz, {}-bit, {} ch", format.codec == AudioCodec::AAC ? "AAC" : "ALAC",
+                format.sampleRate, format.bitDepth, format.channels);
+
+            const lock_guard<mutex> guard(m_mtxInfo);
+            m_activeFormat = format;
         }
         vector<int16_t> pcm;
 

@@ -64,6 +64,8 @@ public:
 	bool EnableServer(bool enable) noexcept;
 
 	bool GetProgress(int& duration, int& position, std::string& clientID) const noexcept;
+	// description of the current audio session (protocol, codec, ...); empty if there's none
+	std::string GetConnectionInfo() const noexcept;
 	bool IsPlaying() const noexcept;
 
 	static int SendDacpCommand(const DacpID& dacpID, const std::string& cmd) noexcept;

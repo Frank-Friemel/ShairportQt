@@ -76,6 +76,9 @@ the time goes.
 - **FairPlay (`/fp-setup`)**: shairport-sync shows AP2 audio works **without** FairPlay as long as the
   advertised features don't require it. Don't implement it. The only open source implementation
   (playfair) carries legal and licensing risk.
+  *Update:* a real iPhone hangs up after the pairing unless bit 14 is advertised and `/fp-setup` is answered.
+  The handshake is now answered with shairport-sync's fixed replies (no FairPlay decryption, no playfair),
+  see `doc/AirPlay2.md`.
 - Keep the password (Digest auth) feature working for AP1. For AP2, a password means switching to the
   password-based pair-setup path (`X-Apple-HKP: 3`), with the password as the SRP secret. **+3–5 days.**
 

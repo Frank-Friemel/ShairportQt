@@ -15,4 +15,7 @@ public:
     virtual int GetProgressTime() const noexcept = 0;
     virtual bool IsPlaying() const noexcept = 0;
     virtual uint64_t GetSamplingFreq() const noexcept = 0;
+
+    // human readable description of the protocol / stream (e.g. "AirPlay 2 · ALAC 44.1 kHz ...")
+    virtual std::string GetConnectionInfo() const = 0;
 };

@@ -8,6 +8,10 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if (MSVC AND NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 # locate packages
 if (UNIX)
     find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets DBus)
@@ -32,7 +36,7 @@ set(LIBRARY_SOURCES lib/dnssd.cpp lib/RaopServer.cpp lib/LayerCake.cpp lib/base6
 set(AIRPLAY2_SOURCES lib/airplay2/Ap2Crypto.cpp lib/airplay2/Tlv8.cpp lib/airplay2/Plist.cpp
         lib/airplay2/Srp.cpp lib/airplay2/Pairing.cpp lib/airplay2/SecureChannel.cpp
         lib/airplay2/PtpClock.cpp lib/airplay2/Ap2Decoder.cpp lib/airplay2/Ap2AudioSession.cpp
-        lib/airplay2/AirPlay2Handler.cpp)
+        lib/airplay2/AirPlay2Handler.cpp lib/airplay2/FairPlaySetup.cpp)
 list(APPEND LIBRARY_SOURCES ${AIRPLAY2_SOURCES})
 
 # FFmpeg (libavcodec, libavutil, libswresample) is needed to decode AirPlay 2 audio (AAC / ALAC)
@@ -65,8 +69,6 @@ endif()
 
 add_library(ShairLib STATIC ${LIBRARY_SOURCES})
 if (MSVC)
-    # we apply the static CRT for MSVC
-    set_property(TARGET ShairLib PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     # dismiss several warnings
     target_compile_options(ShairLib PRIVATE -wd4996)
 else()
@@ -127,8 +129,6 @@ endif()
 add_executable(ShairportQt ${APP_SOURCES} ${APP_RESOURCE})
 
 if (MSVC)
-    # we apply the static CRT for MSVC
-    set_property(TARGET ShairportQt PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     message(STATUS "Build-Type: ${CMAKE_BUILD_TYPE} in folder: ${CMAKE_CURRENT_SOURCE_DIR}")
     if (CMAKE_BUILD_TYPE MATCHES ".*Rel.*")
         message(STATUS "We'll create a Windows-App")
@@ -161,6 +161,7 @@ if (UNIX)
 else()
     target_link_libraries(ShairportQt PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
     target_link_libraries(ShairportQt PRIVATE unofficial::wintoast::wintoast)
+    target_link_libraries(ShairportQt PRIVATE windowsapp)
 endif()
 
 if (NOT(CMAKE_BUILD_TYPE MATCHES ".*MinSize.*") AND NOT(CMAKE_BUILD_TYPE MATCHES ".*RelWith.*"))
@@ -181,8 +182,6 @@ if (NOT(CMAKE_BUILD_TYPE MATCHES ".*MinSize.*") AND NOT(CMAKE_BUILD_TYPE MATCHES
     add_executable(ShairportQtTest ${TEST_SOURCES})
 
     if (MSVC)
-        # we apply the dynamic CRT for MSVC
-        set_property(TARGET ShairportQtTest PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         # dismiss several warnings
         target_compile_options(ShairportQtTest PRIVATE -wd4996)
     else()

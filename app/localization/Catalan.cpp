@@ -126,6 +126,9 @@ namespace Localization::Catalan
 		case StringID::LABEL_ENABLE_AIRPLAY2:
 			return "AirPlay 2 (experimental)"s;
 
+		case StringID::LABEL_SHOW_CONNECTION_DETAILS:
+			return "Mostra els detalls de la connexió (versió d'AirPlay, còdec...)"s;
+
 		case StringID::LABEL_LOG_TO_FILE:
 			return "Guardar registres a fitxer"s;
 

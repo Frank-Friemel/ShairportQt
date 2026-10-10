@@ -7,9 +7,13 @@
 namespace AirPlay2
 {
     class SrpServer;
+    class Tlv8;
 
     // Per-connection AirPlay 2 pairing state machine
-    // supports "transient" pair-setup (SRP with the fixed PIN 3939) and pair-verify
+    // supports "transient" pair-setup (SRP with the fixed PIN 3939), the full (HomeKit) pair-setup
+    // without persisting the controllers, and pair-verify
+    // like shairport-sync, only a completed transient pair-setup enables the control channel encryption:
+    // senders run pair-verify (and a full pair-setup) on the plain connection before the transient pair-setup
     class Pairing
     {
     public:
@@ -33,12 +37,17 @@ namespace AirPlay2
         static constexpr const char* SetupPin = "3939";
 
     private:
+        Bytes HandlePairSetupM5(const Tlv8& request);
+
         const Crypto::Ed25519Key    m_identity;
         const std::string           m_deviceId;
         std::unique_ptr<SrpServer>  m_srp;
         Bytes                       m_secret;
         bool                        m_enableEncryption{ false };
-        bool                        m_setupDone{ false };
+        bool                        m_transient{ false };
+
+        // SRP session key of a full pair-setup between M4 and M5
+        Bytes                       m_setupKey;
 
         // pair-verify state
         Bytes                       m_verifyPrivate;
