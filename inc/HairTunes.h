@@ -9,6 +9,7 @@
 #include "RaopEndpoint.h"
 #include <list>
 #include "crypto.h"
+#include "IAudioSession.h"
 
 namespace alac
 {
@@ -17,6 +18,7 @@ namespace alac
 
 class HairTunes
     : public IRtpRequestHandler
+    , public IAudioSession
 {
 public:
     HairTunes(const SharedPtr<IValueCollection> config, SharedPtr<IValueCollection>&& client);
@@ -26,14 +28,15 @@ public:
     unsigned int GetControlPort() const noexcept;
     unsigned int GetTimingPort() const noexcept;
 
-    void Flush(unsigned int seq = 0) noexcept;
+    void Flush(unsigned int seq = 0) noexcept override;
 
-    const std::string& GetClientID() const noexcept;
+    const std::string& GetClientID() const noexcept override;
 
-    void ResetProgess() noexcept;
-    int GetProgressTime() const noexcept;
-    bool IsPlaying() const noexcept;
-    uint64_t GetSamplingFreq() const noexcept;
+    void ResetProgess() noexcept override;
+    int GetProgressTime() const noexcept override;
+    bool IsPlaying() const noexcept override;
+    uint64_t GetSamplingFreq() const noexcept override;
+    std::string GetConnectionInfo() const override;
 
 protected:
     void OnRequest(RtpEndpoint* endpoint, std::unique_ptr<RtpPacket>&& packet) override;

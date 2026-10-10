@@ -19,7 +19,8 @@ jobs:
         sudo apt update
         sudo apt install -y \
           cmake build-essential \
-            libssl-dev libspdlog-dev libgtest-dev libgmock-dev libasound2-dev
+            libssl-dev libspdlog-dev libgtest-dev libgmock-dev libasound2-dev \
+            pkg-config libavcodec-dev libavutil-dev libswresample-dev
 
     - name: Install sockpp
       run: |

@@ -494,6 +494,8 @@ public:
 using Range = std::pair<ssize_t, ssize_t>;
 using Ranges = std::vector<Range>;
 
+struct ConnectionContext;
+
 struct Request {
   std::string method;
   std::string path;
@@ -505,6 +507,11 @@ struct Request {
   std::string local_addr;
   int local_port = -1;
   std::vector<uint8_t> localIPAddr;
+
+  // per-connection context (server only, RAOP extension)
+  std::shared_ptr<ConnectionContext> connection;
+  // true if the request was synthesized because the connection has been closed (RAOP extension)
+  bool connection_closed_request = false;
 
   // for server
   std::string version;
@@ -614,6 +621,30 @@ public:
   ssize_t write_format(const char *fmt, const Args &...args);
   ssize_t write(const char *ptr);
   ssize_t write(const std::string &s);
+};
+
+// RAOP extension: a filter which transforms the bytes of a connection
+// (e.g. to encrypt an RTSP connection after a pairing has been established)
+class StreamFilter {
+public:
+  virtual ~StreamFilter() = default;
+
+  // read decoded data, using "raw" to receive more bytes from the socket
+  virtual ssize_t read(Stream &raw, char *ptr, size_t size) = 0;
+  // encode the data and write it to "raw"
+  virtual ssize_t write(Stream &raw, const char *ptr, size_t size) = 0;
+  // true if decoded data is available without reading the socket
+  virtual bool has_buffered_data() const = 0;
+};
+
+// RAOP extension: state which lives as long as a server connection
+struct ConnectionContext {
+  // active filter
+  std::shared_ptr<StreamFilter> filter;
+  // filter which gets activated after the current response has been sent
+  std::shared_ptr<StreamFilter> pending_filter;
+  // arbitrary user data
+  std::shared_ptr<void> user_data;
 };
 
 class TaskQueue {
@@ -2562,6 +2593,8 @@ public:
   void get_local_ip_and_port(std::string &ip, int &port, std::vector<uint8_t>* ipaddr) const override;
   socket_t socket() const override;
 
+  bool has_buffered_data() const { return read_buff_off_ < read_buff_content_size_; }
+
 private:
   socket_t sock_;
   time_t read_timeout_sec_;
@@ -2574,6 +2607,34 @@ private:
   size_t read_buff_content_size_ = 0;
 
   static const size_t read_buff_size_ = 1024 * 4;
+};
+
+// RAOP extension: stream which routes reads and writes through the connection's filter
+class FilteredStream : public Stream {
+public:
+  FilteredStream(SocketStream &raw, ConnectionContext &ctx) : raw_(raw), ctx_(ctx) {}
+
+  bool is_readable() const override {
+    return (ctx_.filter && ctx_.filter->has_buffered_data()) || raw_.has_buffered_data() || raw_.is_readable();
+  }
+  bool is_writable() const override { return raw_.is_writable(); }
+  ssize_t read(char *ptr, size_t size) override {
+    return ctx_.filter ? ctx_.filter->read(raw_, ptr, size) : raw_.read(ptr, size);
+  }
+  ssize_t write(const char *ptr, size_t size) override {
+    return ctx_.filter ? ctx_.filter->write(raw_, ptr, size) : raw_.write(ptr, size);
+  }
+  void get_remote_ip_and_port(std::string &ip, int &port) const override {
+    raw_.get_remote_ip_and_port(ip, port);
+  }
+  void get_local_ip_and_port(std::string &ip, int &port, std::vector<uint8_t>* ipaddr) const override {
+    raw_.get_local_ip_and_port(ip, port, ipaddr);
+  }
+  socket_t socket() const override { return raw_.socket(); }
+
+private:
+  SocketStream &raw_;
+  ConnectionContext &ctx_;
 };
 
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
@@ -2602,10 +2663,13 @@ private:
 };
 #endif
 
-inline bool keep_alive(socket_t sock, time_t keep_alive_timeout_sec, bool noTimeout) {
+inline bool keep_alive(const std::atomic<socket_t> &svr_sock, socket_t sock,
+                       time_t keep_alive_timeout_sec, bool noTimeout) {
   using namespace std::chrono;
   auto start = steady_clock::now();
-  while (true) {
+  // stop waiting once the server is shutting down (connections without timeout,
+  // e.g. AirPlay 2 senders, would otherwise block Server::stop forever)
+  while (svr_sock != INVALID_SOCKET) {
     auto val = select_read(sock, 0, 10000);
     if (val < 0) {
       return false;
@@ -2619,6 +2683,7 @@ inline bool keep_alive(socket_t sock, time_t keep_alive_timeout_sec, bool noTime
       return true;
     }
   }
+  return false;
 }
 
 template <typename T>
@@ -2630,7 +2695,7 @@ process_server_socket_core(const std::atomic<socket_t> &svr_sock, socket_t sock,
   auto ret = false;
   auto count = keep_alive_max_count;
   while (svr_sock != INVALID_SOCKET && count > 0 &&
-         keep_alive(sock, keep_alive_timeout_sec, keep_alive_max_count == std::numeric_limits<size_t>::max())) {
+         keep_alive(svr_sock, sock, keep_alive_timeout_sec, keep_alive_max_count == std::numeric_limits<size_t>::max())) {
     auto close_connection = count == 1;
     auto connection_closed = false;
     ret = callback(close_connection, connection_closed);
@@ -6232,24 +6297,46 @@ Server::process_request(Stream &strm, bool close_connection,
 inline bool Server::is_valid() const { return true; }
 
 inline bool Server::process_and_close_socket(socket_t sock) {
-  auto ret = detail::process_server_socket(
-      svr_sock_, sock, keep_alive_max_count_, keep_alive_timeout_sec_,
-      read_timeout_sec_, read_timeout_usec_, write_timeout_sec_,
-      write_timeout_usec_,
-      [this](Stream &strm, bool close_connection, bool &connection_closed) {
-        return process_request(strm, close_connection, connection_closed,
-                               nullptr);
-      });
+  // RAOP extension: one stream and one context for the whole lifetime of the connection
+  // (keeps buffered bytes between requests and allows to switch to an encrypted channel)
+  auto ctx = std::make_shared<ConnectionContext>();
+  detail::SocketStream raw(sock, read_timeout_sec_, read_timeout_usec_,
+                           write_timeout_sec_, write_timeout_usec_);
+  detail::FilteredStream strm(raw, *ctx);
+
+  const auto setup_request = [&ctx](Request &req) { req.connection = ctx; };
+
+  auto ret = false;
+  auto count = keep_alive_max_count_;
+  const bool no_timeout = keep_alive_max_count_ == (std::numeric_limits<size_t>::max)();
+
+  while (svr_sock_ != INVALID_SOCKET && count > 0) {
+    const bool buffered = raw.has_buffered_data() ||
+                          (ctx->filter && ctx->filter->has_buffered_data());
+
+    if (!buffered && !detail::keep_alive(svr_sock_, sock, keep_alive_timeout_sec_, no_timeout)) {
+      break;
+    }
+    auto close_connection = count == 1;
+    auto connection_closed = false;
+    ret = process_request(strm, close_connection, connection_closed, setup_request);
+
+    if (ctx->pending_filter) {
+      ctx->filter = std::move(ctx->pending_filter);
+    }
+    if (!ret || connection_closed) { break; }
+
+    if (!no_timeout) { count--; }
+  }
 
   {
-      detail::SocketStream strm(sock, read_timeout_sec_, read_timeout_usec_,
-          write_timeout_sec_, write_timeout_usec_);
-
       Request req;
       Response res;
       req.method = { "TEARDOWN", 8 };
       req.path = { "/", 1 };
-      strm.get_remote_ip_and_port(req.remote_addr, req.remote_port);
+      req.connection = ctx;
+      req.connection_closed_request = true;
+      raw.get_remote_ip_and_port(req.remote_addr, req.remote_port);
       
       dispatch_request(req, res, this->get_handlers_);
   }

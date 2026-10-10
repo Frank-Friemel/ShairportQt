@@ -231,6 +231,14 @@ uint64_t HairTunes::GetSamplingFreq() const noexcept
     return m_samplingRate;
 }
 
+string HairTunes::GetConnectionInfo() const
+{
+    // AirPlay 1 (RAOP): ALAC over RTP/UDP, AES-128-CBC with an RSA-wrapped key
+    return "AirPlay 1 (RAOP) | ALAC "s + to_string(m_samplingRate) + " Hz, "s +
+        to_string(SAMPLE_SIZE) + "-bit, "s + to_string(NUM_CHANNELS) + " ch | RTP/UDP | "s +
+        (m_aes.IsValid() ? "RSA + AES-128 encrypted"s : "unencrypted"s);
+}
+
 bool HairTunes::AsyncRequestResend(const USHORT nSeq, const short nCount) noexcept
 {
     try

@@ -2,6 +2,8 @@
 
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 #include "LayerCake.h"
 #include <future>
 #include <assert.h>
@@ -95,7 +97,13 @@ protected:
 public:
     DnsSD(bool forceNative);
     
-    DnsHandlePtr CreateRaopServiceFromConfig(const SharedPtr<IValueCollection>& config, bool metaInfo);
+    using TxtRecords = std::vector<std::pair<std::string, std::string>>;
+
+    // additionalRecords are appended to (or replace) the standard RAOP records
+    DnsHandlePtr CreateRaopServiceFromConfig(const SharedPtr<IValueCollection>& config, bool metaInfo, const TxtRecords& additionalRecords = {});
+    // AirPlay 2 "_airplay._tcp" service
+    DnsHandlePtr CreateAirPlayService(const SharedPtr<IValueCollection>& config, const TxtRecords& records);
+    DnsHandlePtr RegisterService(const std::wstring& name, const std::wstring& regType, uint16_t port, const TxtRecords& records);
     DnsHandlePtr BrowseForService(const char* strRegType, IDnsSDEvents* cb);
     DnsHandlePtr ResolveService(uint32_t interfaceIndex,
         const std::string& strService, const std::string& strRegType, const std::string& strReplyDomain, IDnsSDEvents* cb);

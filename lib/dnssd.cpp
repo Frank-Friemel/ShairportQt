@@ -7,7 +7,6 @@
 #include "Networking.h"
 #include <set>
 
-static uint8_t TxtLen(const char* txt) noexcept;
 
 #ifdef _WIN32
 #include <windns.h>
@@ -671,15 +670,72 @@ DnsSD::~DnsSD()
 {
 }
 
-DnsHandlePtr DnsSD::CreateRaopServiceFromConfig(const SharedPtr<IValueCollection>& config, bool metaInfo)
+DnsHandlePtr DnsSD::CreateRaopServiceFromConfig(const SharedPtr<IValueCollection>& config, bool metaInfo, const TxtRecords& additionalRecords)
 {
     const bool      hasPassword = VariantValue::Key("HasPassword").Get<bool>(config) &&
                                 !VariantValue::Key("Password").Get<string>(config).empty();
     const auto      hwAddr      = VariantValue::Key("HWaddress").Get<vector<uint8_t>>(config);
     const uint16_t  port        = VariantValue::Key("RaopPort").Get<uint16_t>(config);
     const wstring   name        = CA2WEX(EncodeToHex(hwAddr, true)) + L"@"s + VariantValue::Key("APname").Get<wstring>(config);
-    const wstring   regType     = L"_raop._tcp"s;
 
+    TxtRecords records;
+
+    records.emplace_back("txtvers", RAOP_TXTVERS);
+    records.emplace_back("ch", RAOP_CH);
+    records.emplace_back("cn", RAOP_CN);
+    records.emplace_back("et", RAOP_ET);
+    records.emplace_back("sv", RAOP_SV);
+
+    if (!hasPassword)
+    {
+        records.emplace_back("da", RAOP_DA);
+    }
+    records.emplace_back("sr", RAOP_SR);
+    records.emplace_back("ss", RAOP_SS);
+    records.emplace_back("pw", hasPassword ? "true" : "false");
+    records.emplace_back("vn", RAOP_VN);
+    records.emplace_back("tp", RAOP_TP);
+    records.emplace_back("md", metaInfo ? RAOP_MD : RAOP_NO_MD);
+
+    if (!hasPassword)
+    {
+        records.emplace_back("vs", GLOBAL_VERSION);
+    }
+    records.emplace_back("sm", RAOP_SM);
+    records.emplace_back("ek", RAOP_EK);
+
+    for (const auto& record : additionalRecords)
+    {
+        // additional records replace existing ones
+        bool replaced = false;
+
+        for (auto& existing : records)
+        {
+            if (existing.first == record.first)
+            {
+                existing.second = record.second;
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced)
+        {
+            records.push_back(record);
+        }
+    }
+    return RegisterService(name, L"_raop._tcp"s, port, records);
+}
+
+DnsHandlePtr DnsSD::CreateAirPlayService(const SharedPtr<IValueCollection>& config, const TxtRecords& records)
+{
+    const uint16_t  port = VariantValue::Key("RaopPort").Get<uint16_t>(config);
+    const wstring   name = VariantValue::Key("APname").Get<wstring>(config);
+
+    return RegisterService(name, L"_airplay._tcp"s, port, records);
+}
+
+DnsHandlePtr DnsSD::RegisterService(const wstring& name, const wstring& regType, uint16_t port, const TxtRecords& txtRecords)
+{
 #ifdef _WIN32
     if (m_forceNative)
     {
@@ -688,45 +744,10 @@ DnsHandlePtr DnsSD::CreateRaopServiceFromConfig(const SharedPtr<IValueCollection
         vector<const wchar_t*> keys;
         vector<const wchar_t*> values;
 
-        TXTRecordSetValue(records, keys, values, "txtvers", TxtLen(RAOP_TXTVERS), RAOP_TXTVERS);
-        TXTRecordSetValue(records, keys, values, "ch", TxtLen(RAOP_CH), RAOP_CH);
-        TXTRecordSetValue(records, keys, values, "cn", TxtLen(RAOP_CN), RAOP_CN);
-        TXTRecordSetValue(records, keys, values, "et", TxtLen(RAOP_ET), RAOP_ET);
-        TXTRecordSetValue(records, keys, values, "sv", TxtLen(RAOP_SV), RAOP_SV);
-
-        if (!hasPassword)
+        for (const auto& record : txtRecords)
         {
-            TXTRecordSetValue(records, keys, values, "da", TxtLen(RAOP_DA), RAOP_DA);
+            TXTRecordSetValue(records, keys, values, record.first.c_str(), static_cast<uint8_t>(record.second.size()), record.second.c_str());
         }
-        TXTRecordSetValue(records, keys, values, "sr", TxtLen(RAOP_SR), RAOP_SR);
-        TXTRecordSetValue(records, keys, values, "ss", TxtLen(RAOP_SS), RAOP_SS);
-        
-        if (hasPassword) 
-        {
-            TXTRecordSetValue(records, keys, values, "pw", TxtLen("true"), "true");
-        } 
-        else 
-        {
-            TXTRecordSetValue(records, keys, values, "pw", TxtLen("false"), "false");
-        }
-        TXTRecordSetValue(records, keys, values, "vn", TxtLen(RAOP_VN), RAOP_VN);
-        TXTRecordSetValue(records, keys, values, "tp", TxtLen(RAOP_TP), RAOP_TP);
-
-        if (!metaInfo)
-        {
-            TXTRecordSetValue(records, keys, values, "md", TxtLen(RAOP_NO_MD), RAOP_NO_MD);
-        }
-        else
-        {
-            TXTRecordSetValue(records, keys, values, "md", TxtLen(RAOP_MD), RAOP_MD);
-        }
-        if (!hasPassword)
-        {
-            TXTRecordSetValue(records, keys, values, "vs", TxtLen(GLOBAL_VERSION), GLOBAL_VERSION);
-        }
-        TXTRecordSetValue(records, keys, values, "sm", TxtLen(RAOP_SM), RAOP_SM);
-        TXTRecordSetValue(records, keys, values, "ek", TxtLen(RAOP_EK), RAOP_EK);
- 
         const wstring serviceName = name + L"."s + regType + L".local"s;
     
         return make_shared<DnsSDHandle>(this, new DnsRegisterServiceContext(serviceName, port, keys, values));
@@ -736,45 +757,11 @@ DnsHandlePtr DnsSD::CreateRaopServiceFromConfig(const SharedPtr<IValueCollection
     TXTRecordRef txtRecord;
 
     m_descriptor->m_funcTXTRecordCreate(&txtRecord, 0, NULL);
-    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "txtvers", TxtLen(RAOP_TXTVERS), RAOP_TXTVERS);
-    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "ch", TxtLen(RAOP_CH), RAOP_CH);
-    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "cn", TxtLen(RAOP_CN), RAOP_CN);
-    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "et", TxtLen(RAOP_ET), RAOP_ET);
-    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "sv", TxtLen(RAOP_SV), RAOP_SV);
 
-    if (!hasPassword)
+    for (const auto& record : txtRecords)
     {
-        m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "da", TxtLen(RAOP_DA), RAOP_DA);
+        m_descriptor->m_funcTXTRecordSetValue(&txtRecord, record.first.c_str(), static_cast<uint8_t>(record.second.size()), record.second.c_str());
     }
-    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "sr", TxtLen(RAOP_SR), RAOP_SR);
-    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "ss", TxtLen(RAOP_SS), RAOP_SS);
-    
-    if (hasPassword) 
-    {
-        m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "pw", TxtLen("true"), "true");
-    } 
-    else 
-    {
-        m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "pw", TxtLen("false"), "false");
-    }
-    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "vn", TxtLen(RAOP_VN), RAOP_VN);
-    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "tp", TxtLen(RAOP_TP), RAOP_TP);
-
-    if (!metaInfo)
-    {
-        m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "md", TxtLen(RAOP_NO_MD), RAOP_NO_MD);
-    }
-    else
-    {
-        m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "md", TxtLen(RAOP_MD), RAOP_MD);
-    }
-    if (!hasPassword)
-    {
-        m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "vs", TxtLen(GLOBAL_VERSION), GLOBAL_VERSION);
-    }
-    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "sm", TxtLen(RAOP_SM), RAOP_SM);
-    m_descriptor->m_funcTXTRecordSetValue(&txtRecord, "ek", TxtLen(RAOP_EK), RAOP_EK);
-
     DNSServiceRef sdRef = nullptr;
 
     const auto error = m_descriptor->m_funcDNSServiceRegister(&sdRef, 0, kDNSServiceInterfaceIndexAny, CW2AEX(name).c_str()
@@ -1020,13 +1007,5 @@ bool DnsSDHandle::Succeeded() const noexcept
 int DnsSDHandle::ErrorCode() const noexcept
 {
     return m_error;
-}
-
-static uint8_t TxtLen(const char* txt) noexcept
-{
-    const size_t l = strlen(txt);
-    assert(l < 256);
-
-    return static_cast<uint8_t>(l);
 }
 
