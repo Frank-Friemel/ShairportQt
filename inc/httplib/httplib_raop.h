@@ -2663,10 +2663,13 @@ private:
 };
 #endif
 
-inline bool keep_alive(socket_t sock, time_t keep_alive_timeout_sec, bool noTimeout) {
+inline bool keep_alive(const std::atomic<socket_t> &svr_sock, socket_t sock,
+                       time_t keep_alive_timeout_sec, bool noTimeout) {
   using namespace std::chrono;
   auto start = steady_clock::now();
-  while (true) {
+  // stop waiting once the server is shutting down (connections without timeout,
+  // e.g. AirPlay 2 senders, would otherwise block Server::stop forever)
+  while (svr_sock != INVALID_SOCKET) {
     auto val = select_read(sock, 0, 10000);
     if (val < 0) {
       return false;
@@ -2680,6 +2683,7 @@ inline bool keep_alive(socket_t sock, time_t keep_alive_timeout_sec, bool noTime
       return true;
     }
   }
+  return false;
 }
 
 template <typename T>
@@ -2691,7 +2695,7 @@ process_server_socket_core(const std::atomic<socket_t> &svr_sock, socket_t sock,
   auto ret = false;
   auto count = keep_alive_max_count;
   while (svr_sock != INVALID_SOCKET && count > 0 &&
-         keep_alive(sock, keep_alive_timeout_sec, keep_alive_max_count == std::numeric_limits<size_t>::max())) {
+         keep_alive(svr_sock, sock, keep_alive_timeout_sec, keep_alive_max_count == std::numeric_limits<size_t>::max())) {
     auto close_connection = count == 1;
     auto connection_closed = false;
     ret = callback(close_connection, connection_closed);
@@ -6310,7 +6314,7 @@ inline bool Server::process_and_close_socket(socket_t sock) {
     const bool buffered = raw.has_buffered_data() ||
                           (ctx->filter && ctx->filter->has_buffered_data());
 
-    if (!buffered && !detail::keep_alive(sock, keep_alive_timeout_sec_, no_timeout)) {
+    if (!buffered && !detail::keep_alive(svr_sock_, sock, keep_alive_timeout_sec_, no_timeout)) {
       break;
     }
     auto close_connection = count == 1;
